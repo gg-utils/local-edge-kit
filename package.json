@@ -1,0 +1,157 @@
+{
+  "name": "@gg-utils/local-edge-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable local-edge command kit for project-owned local-edge.config.ts adapters.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./cli": {
+      "types": "./src/cli.ts",
+      "default": "./src/cli.ts"
+    },
+    "./config": {
+      "types": "./src/config.ts",
+      "default": "./src/config.ts"
+    },
+    "./dns-audit-cli": {
+      "types": "./src/dns-audit-cli.ts",
+      "default": "./src/dns-audit-cli.ts"
+    },
+    "./env": {
+      "types": "./src/env.ts",
+      "default": "./src/env.ts"
+    },
+    "./healthcheck-cli": {
+      "types": "./src/healthcheck-cli.ts",
+      "default": "./src/healthcheck-cli.ts"
+    },
+    "./interactive-action-menu": {
+      "types": "./src/interactive-action-menu.ts",
+      "default": "./src/interactive-action-menu.ts"
+    },
+    "./ink-action-browser-model": {
+      "types": "./src/ink-action-browser-model.ts",
+      "default": "./src/ink-action-browser-model.ts"
+    },
+    "./ink-action-browser-app": {
+      "types": "./src/ink-action-browser-app.tsx",
+      "default": "./src/ink-action-browser-app.tsx"
+    },
+    "./helper-server-config": {
+      "types": "./src/helper-server-config.ts",
+      "default": "./src/helper-server-config.ts"
+    },
+    "./helper-dashboard-server": {
+      "types": "./src/helper-dashboard-server.ts",
+      "default": "./src/helper-dashboard-server.ts"
+    },
+    "./runtime-config": {
+      "types": "./src/runtime-config.ts",
+      "default": "./src/runtime-config.ts"
+    },
+    "./runtime-launch": {
+      "types": "./src/runtime-launch.ts",
+      "default": "./src/runtime-launch.ts"
+    },
+    "./status-cli": {
+      "types": "./src/status-cli.ts",
+      "default": "./src/status-cli.ts"
+    },
+    "./url-matrix": {
+      "types": "./src/url-matrix.ts",
+      "default": "./src/url-matrix.ts"
+    },
+    "./urls-cli": {
+      "types": "./src/urls-cli.ts",
+      "default": "./src/urls-cli.ts"
+    },
+    "./package.json": "./package.json",
+    "./startup-cli": {
+      "types": "./src/startup-cli.ts",
+      "default": "./src/startup-cli.ts"
+    },
+    "./lifecycle-plans": {
+      "types": "./src/lifecycle-plans.ts",
+      "default": "./src/lifecycle-plans.ts"
+    },
+    "./logs-cli": {
+      "types": "./src/logs-cli.ts",
+      "default": "./src/logs-cli.ts"
+    },
+    "./logs-web-server": {
+      "types": "./src/logs-web-server.ts",
+      "default": "./src/logs-web-server.ts"
+    },
+    "./opentui-action-browser-model": {
+      "types": "./src/opentui-action-browser-model.ts",
+      "default": "./src/opentui-action-browser-model.ts"
+    },
+    "./opentui-action-browser-app": {
+      "types": "./src/opentui-action-browser-app.tsx",
+      "default": "./src/opentui-action-browser-app.tsx"
+    },
+    "./shell/with-logs-runner.sh": "./shell/with-logs-runner.sh",
+    "./shell/runtime-stop-lib.sh": "./shell/runtime-stop-lib.sh",
+    "./shell/session-stop-runner.sh": "./shell/session-stop-runner.sh",
+    "./shell/session-kill-runner.sh": "./shell/session-kill-runner.sh",
+    "./shell/canonical-start-runner.sh": "./shell/canonical-start-runner.sh",
+    "./shell/setup-bootstrap-runner.sh": "./shell/setup-bootstrap-runner.sh",
+    "./shell/lib-runtime-helpers.sh": "./shell/lib-runtime-helpers.sh",
+    "./shell/start-nginx-docker-runner.sh": "./shell/start-nginx-docker-runner.sh",
+    "./shell/start-all-runner.sh": "./shell/start-all-runner.sh",
+    "./docker-host": {
+      "types": "./src/docker-host.ts",
+      "default": "./src/docker-host.ts"
+    },
+    "./command-runtime": {
+      "types": "./src/command-runtime.ts",
+      "default": "./src/command-runtime.ts"
+    },
+    "./doctor-core-cli": {
+      "types": "./src/doctor-core-cli.ts",
+      "default": "./src/doctor-core-cli.ts"
+    },
+    "./ui-launcher": {
+      "types": "./src/ui-launcher.ts",
+      "default": "./src/ui-launcher.ts"
+    },
+    "./ui-action-catalog": {
+      "types": "./src/ui-action-catalog.ts",
+      "default": "./src/ui-action-catalog.ts"
+    },
+    "./ui-spawn-request": {
+      "types": "./src/ui-spawn-request.ts",
+      "default": "./src/ui-spawn-request.ts"
+    }
+  },
+  "bin": {
+    "local-edge-kit": "./src/bin/local-edge-kit.ts"
+  },
+  "files": [
+    "src/",
+    "shell/",
+    "README.md",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=24.11.1 <25",
+    "npm": ">=9.0.0"
+  },
+  "packageManager": "npm@11.12.1",
+  "dependencies": {
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#main",
+    "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#main"
+  },
+  "scripts": {
+    "type-check": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test": "node ../../node_modules/tsx/dist/cli.mjs --test \"src/**/*.unit.test.ts\""
+  }
+}
