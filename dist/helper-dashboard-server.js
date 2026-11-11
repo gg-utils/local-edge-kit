@@ -23,7 +23,6 @@
  *
  * LocalEdgeKit_startHelperDashboardServer({
  *   autoOpen: false,
- *   bindHost: "0.0.0.0",
  *   htmlPath: "/abs/path/to/index.html",
  *   htmlTransform: (html) => html,
  *   openCommand: "open",
@@ -33,6 +32,11 @@
  *   surfaceId: "platform-status",
  * });
  * ```
+ *
+ * The server binds 127.0.0.1 unless `bindHost` is given. Every request must carry a Host header
+ * that names this server (a loopback name or the bind host on the listening port, the host of
+ * `subdomainUrl`, or an `allowedHosts` entry) and, when it has an Origin header, the origin of that
+ * same host; anything else gets a 403.
  *
  * @testing Node test runner: cd packages/local-edge-kit && node ../../node_modules/tsx/dist/cli.mjs --test src/helper-dashboard-server.unit.test.ts
  *
@@ -44,6 +48,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import fs from "node:fs";
 import { createServer, } from "node:http";
+import { LocalEdgeKit_checkLocalRequest, LocalEdgeKit_localRequestRejectionBody, LocalEdgeKit_resolveBindHost, } from "./local-request-guard.js";
 const LocalEdgeKit_defaultHelperDashboardOperations = () => ({
     createServer,
     execFile: (command, args, callback) => {
@@ -133,7 +138,28 @@ function LocalEdgeKit_writeJsonResponse(options) {
     });
     options.res.end(options.body);
 }
+/** Returns the Host value of a URL, or null when the text is not a URL. */
+function LocalEdgeKit_urlHost(url) {
+    try {
+        return new URL(url).host;
+    }
+    catch {
+        return null;
+    }
+}
 function LocalEdgeKit_handleHelperDashboardRequest(options) {
+    const guard = LocalEdgeKit_checkLocalRequest({
+        allowedHosts: options.allowedHosts,
+        bindHost: options.bindHost,
+        hostHeader: options.req.headers.host,
+        localPort: options.req.socket.localPort,
+        originHeader: options.req.headers.origin,
+    });
+    if (!guard.allowed) {
+        options.res.writeHead(403, { "Content-Type": "text/plain" });
+        options.res.end(LocalEdgeKit_localRequestRejectionBody(guard.reason));
+        return;
+    }
     const url = new URL(options.req.url ?? "/", `http://localhost:${String(options.serverOptions.port)}`);
     if (url.pathname === "/api/status") {
         LocalEdgeKit_writeJsonResponse({
@@ -178,6 +204,12 @@ export function LocalEdgeKit_startHelperDashboardServer(options) {
     const operations = LocalEdgeKit_resolveHelperDashboardOperations(options.operations);
     const stdout = options.stdout ?? ((line) => console.log(line));
     const stderr = options.stderr ?? ((line) => console.warn(line));
+    const bindHost = LocalEdgeKit_resolveBindHost(options.bindHost);
+    const subdomainHost = LocalEdgeKit_urlHost(options.subdomainUrl);
+    const allowedHosts = [
+        ...(options.allowedHosts ?? []),
+        ...(subdomainHost === null ? [] : [subdomainHost]),
+    ];
     const server = operations.createServer((req, res) => {
         const requestStartTime = operations.nowMs();
         res.on("finish", () => {
@@ -192,6 +224,8 @@ export function LocalEdgeKit_startHelperDashboardServer(options) {
             });
         });
         LocalEdgeKit_handleHelperDashboardRequest({
+            allowedHosts,
+            bindHost,
             operations,
             req,
             res,
@@ -199,7 +233,7 @@ export function LocalEdgeKit_startHelperDashboardServer(options) {
             stderr,
         });
     });
-    server.listen(options.port, options.bindHost, () => {
+    server.listen(options.port, bindHost, () => {
         for (const line of options.startupLines) {
             stdout(line);
         }

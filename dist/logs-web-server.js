@@ -6,6 +6,11 @@
  * websocket subscription/filter/search/pause handling, tail process lifecycle, HTTP health/static
  * responses, startup banners, and shutdown cleanup.
  *
+ * The server binds 127.0.0.1 unless `bindHost` is given. Every HTTP request and websocket upgrade
+ * must carry a Host header that names this server (a loopback name or the bind host on the
+ * listening port, or an `allowedHosts` entry) and, when it has an Origin header, the origin of that
+ * same host; anything else gets a 403 and no websocket connection.
+ *
  * @testing Node test runner unit: cd packages/local-edge-kit && npm run test -- src/logs-web-server.unit.test.ts
  *
  * @see consumer local-edge adapter - consumer adapter that imports LocalEdgeKit_startLogsWebServer and binds source-label taxonomy, HTML paths, websocket host wiring, and request logging for the logs-web UI.
@@ -17,6 +22,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { createServer, } from "node:http";
 import path from "node:path";
+import { LocalEdgeKit_checkLocalRequest, LocalEdgeKit_localRequestRejectionBody, LocalEdgeKit_resolveBindHost, } from "./local-request-guard.js";
 const LOCAL_EDGE_KIT_LOGS_WEB_SCOPES = [
     "run",
     "nginx-docker",
@@ -363,6 +369,18 @@ function LocalEdgeKit_searchLogsWeb(options) {
     });
 }
 function LocalEdgeKit_handleLogsWebHttpRequest(options) {
+    const guard = LocalEdgeKit_checkLocalRequest({
+        allowedHosts: options.serverOptions.allowedHosts,
+        bindHost: options.bindHost,
+        hostHeader: options.req.headers.host,
+        localPort: options.req.socket.localPort,
+        originHeader: options.req.headers.origin,
+    });
+    if (!guard.allowed) {
+        options.res.writeHead(403, { "Content-Type": "text/plain" });
+        options.res.end(LocalEdgeKit_localRequestRejectionBody(guard.reason));
+        return;
+    }
     const reqPathname = new URL(options.req.url ?? "/", "http://localhost")
         .pathname;
     if (reqPathname === "/" || reqPathname === "/index.html") {
@@ -392,6 +410,7 @@ export function LocalEdgeKit_startLogsWebServer(options) {
     const stdout = options.stdout ?? ((line) => console.log(line));
     const stderr = options.stderr ?? ((line) => console.warn(line));
     const clients = new Set();
+    const bindHost = LocalEdgeKit_resolveBindHost(options.bindHost);
     const server = operations.createServer((req, res) => {
         const requestStartTime = operations.nowMs();
         res.on("finish", () => {
@@ -406,6 +425,7 @@ export function LocalEdgeKit_startLogsWebServer(options) {
             });
         });
         LocalEdgeKit_handleLogsWebHttpRequest({
+            bindHost,
             clientCount: () => clients.size,
             operations,
             req,
@@ -414,6 +434,32 @@ export function LocalEdgeKit_startLogsWebServer(options) {
         });
     });
     const webSocketServer = options.createWebSocketServer(server);
+    // Websocket upgrades never reach the HTTP listener above, and browsers do not apply the
+    // same-origin policy to them, so they get the same check here. The listener is put in front of
+    // the adapter's own upgrade listener so a rejected socket is closed before the adapter sees it.
+    server.prependListener("upgrade", (req, socket) => {
+        const guard = LocalEdgeKit_checkLocalRequest({
+            allowedHosts: options.allowedHosts,
+            bindHost,
+            hostHeader: req.headers.host,
+            localPort: req.socket.localPort,
+            originHeader: req.headers.origin,
+        });
+        if (guard.allowed) {
+            return;
+        }
+        const body = LocalEdgeKit_localRequestRejectionBody(guard.reason);
+        // The adapter may still try to write its own refusal to this socket; that late write must
+        // not surface as an unhandled socket error.
+        socket.on("error", () => { });
+        socket.end(`HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: ${String(Buffer.byteLength(body))}\r\n\r\n${body}`, () => {
+            socket.destroy();
+        });
+        // The adapter's listener still runs for this event. Without the handshake key no websocket
+        // implementation can accept the connection on the socket closed above.
+        delete req.headers["sec-websocket-key"];
+        delete req.headers.upgrade;
+    });
     webSocketServer.onConnection((ws) => {
         const client = {
             lineCount: 0,
@@ -495,7 +541,7 @@ export function LocalEdgeKit_startLogsWebServer(options) {
             clients.delete(client);
         });
     });
-    server.listen(options.port, options.bindHost, () => {
+    server.listen(options.port, bindHost, () => {
         for (const line of options.startupLines) {
             stdout(line);
         }

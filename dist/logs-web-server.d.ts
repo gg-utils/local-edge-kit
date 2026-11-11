@@ -6,6 +6,11 @@
  * websocket subscription/filter/search/pause handling, tail process lifecycle, HTTP health/static
  * responses, startup banners, and shutdown cleanup.
  *
+ * The server binds 127.0.0.1 unless `bindHost` is given. Every HTTP request and websocket upgrade
+ * must carry a Host header that names this server (a loopback name or the bind host on the
+ * listening port, or an `allowedHosts` entry) and, when it has an Origin header, the origin of that
+ * same host; anything else gets a 403 and no websocket connection.
+ *
  * @testing Node test runner unit: cd packages/local-edge-kit && npm run test -- src/logs-web-server.unit.test.ts
  *
  * @see consumer local-edge adapter - consumer adapter that imports LocalEdgeKit_startLogsWebServer and binds source-label taxonomy, HTML paths, websocket host wiring, and request logging for the logs-web UI.
@@ -69,7 +74,16 @@ export type LocalEdgeKit_LogsWebServerOperations = {
 };
 /** Options for starting the logs-web server. */
 export type LocalEdgeKit_StartLogsWebServerOptions = {
-    readonly bindHost: string;
+    /**
+     * Extra `host` or `host:port` values accepted in the Host header, for a server reached through
+     * a reverse proxy under another name.
+     */
+    readonly allowedHosts?: readonly string[];
+    /**
+     * Address to listen on. Defaults to 127.0.0.1. Give another address, such as `0.0.0.0`, only
+     * when the server must be reachable from outside this machine (for example from a container).
+     */
+    readonly bindHost?: string;
     readonly createWebSocketServer: (server: Server) => LocalEdgeKit_LogsWebSocketServer;
     readonly defaultScope: LocalEdgeKit_LogsWebScope;
     readonly htmlPath: string;
