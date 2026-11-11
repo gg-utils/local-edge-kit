@@ -15,6 +15,13 @@
 
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 
@@ -39,6 +46,57 @@ function isAddressInfo(
   value: AddressInfo | string | null,
 ): value is AddressInfo {
   return typeof value === "object" && value !== null && "port" in value;
+}
+
+/** Sends one GET to the loopback port with the given Host and Origin headers. */
+function requestWithHeaders(options: {
+  readonly headers: Record<string, string>;
+  readonly path: string;
+  readonly port: number;
+}): Promise<{ readonly body: string; readonly status: number | undefined }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        headers: options.headers,
+        host: "127.0.0.1",
+        path: options.path,
+        port: options.port,
+        setHost: false,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf-8");
+        res.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          resolve({ body, status: res.statusCode });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Creates a real server whose `listen` records the requested host but binds loopback, so a test
+ * can prove which address the kit asked for without opening a port on other interfaces.
+ */
+function createHostRecordingServer(recorded: {
+  host: string | undefined;
+}): (listener: (req: IncomingMessage, res: ServerResponse) => void) => Server {
+  return (listener) => {
+    const server = createServer(listener);
+    const listen = server.listen.bind(server);
+    Object.defineProperty(server, "listen", {
+      value: (port: number, host: string, callback: () => void): Server => {
+        recorded.host = host;
+        return listen(port, "127.0.0.1", callback);
+      },
+    });
+    return server;
+  };
 }
 
 void test("LocalEdgeKit_buildHelperDashboardSubdomainUrl omits default HTTPS port", () => {
@@ -164,4 +222,125 @@ void test("LocalEdgeKit_startHelperDashboardServer serves status and transformed
     completionRecords.map((record) => record.surfaceId),
     ["status", "status"],
   );
+});
+
+const guardedDashboardOptions = {
+  artifactEndpoint: endpoint,
+  autoOpen: false,
+  htmlPath: "/virtual/index.html",
+  htmlTransform: (html: string): string => html,
+  openCommand: "open",
+  port: 0,
+  startupLines: [],
+  subdomainUrl: "https://status.realm.method.dev.local.test/",
+  surfaceId: "status",
+};
+
+void test("LocalEdgeKit_startHelperDashboardServer binds loopback when no bind host is given", async (t) => {
+  const server = LocalEdgeKit_startHelperDashboardServer({
+    ...guardedDashboardOptions,
+    operations: { readText: () => "<h1>dashboard</h1>" },
+  });
+  t.after(() => {
+    server.close();
+  });
+
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(isAddressInfo(address));
+  assert.equal(address.address, "127.0.0.1");
+});
+
+void test("LocalEdgeKit_startHelperDashboardServer rejects foreign Host and Origin headers", async (t) => {
+  const server = LocalEdgeKit_startHelperDashboardServer({
+    ...guardedDashboardOptions,
+    operations: { readText: () => JSON.stringify({ secret: "artifact" }) },
+  });
+  t.after(() => {
+    server.close();
+  });
+
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(isAddressInfo(address));
+  const port = address.port;
+  const ownHost = `127.0.0.1:${String(port)}`;
+
+  for (const path of ["/api/status", "/api/health-data", "/dashboard"]) {
+    const foreignHost = await requestWithHeaders({
+      headers: { Host: `attacker.example:${String(port)}` },
+      path,
+      port,
+    });
+    assert.equal(foreignHost.status, 403, path);
+    assert.equal(foreignHost.body, "Forbidden: Host header is not allowed");
+
+    const foreignOrigin = await requestWithHeaders({
+      headers: { Host: ownHost, Origin: "https://attacker.example" },
+      path,
+      port,
+    });
+    assert.equal(foreignOrigin.status, 403, path);
+    assert.equal(foreignOrigin.body, "Forbidden: cross-origin request");
+    assert.ok(!foreignOrigin.body.includes("artifact"));
+  }
+
+  const loopback = await requestWithHeaders({
+    headers: {
+      Host: `localhost:${String(port)}`,
+      Origin: `http://localhost:${String(port)}`,
+    },
+    path: "/api/health-data",
+    port,
+  });
+  assert.equal(loopback.status, 200);
+  assert.equal(loopback.body, JSON.stringify({ secret: "artifact" }));
+
+  const throughEdgeRouter = await requestWithHeaders({
+    headers: {
+      Host: "status.realm.method.dev.local.test",
+      Origin: "https://status.realm.method.dev.local.test",
+    },
+    path: "/api/status",
+    port,
+  });
+  assert.equal(throughEdgeRouter.status, 200);
+});
+
+void test("LocalEdgeKit_startHelperDashboardServer binds a non-loopback host only when asked", async (t) => {
+  const recorded: { host: string | undefined } = { host: undefined };
+  const server = LocalEdgeKit_startHelperDashboardServer({
+    ...guardedDashboardOptions,
+    allowedHosts: ["edge.example.test:8443"],
+    bindHost: "192.0.2.10",
+    operations: {
+      createServer: createHostRecordingServer(recorded),
+      readText: () => "<h1>dashboard</h1>",
+    },
+  });
+  t.after(() => {
+    server.close();
+  });
+
+  await once(server, "listening");
+  assert.equal(recorded.host, "192.0.2.10");
+  const address = server.address();
+  assert.ok(isAddressInfo(address));
+  const port = address.port;
+
+  const statuses: (number | undefined)[] = [];
+  for (const host of [
+    `192.0.2.10:${String(port)}`,
+    "edge.example.test:8443",
+    `192.0.2.11:${String(port)}`,
+    `attacker.example:${String(port)}`,
+  ]) {
+    const response = await requestWithHeaders({
+      headers: { Host: host },
+      path: "/api/status",
+      port,
+    });
+    statuses.push(response.status);
+  }
+  assert.deepEqual(statuses, [200, 200, 403, 403]);
 });

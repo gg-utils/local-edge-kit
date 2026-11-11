@@ -17,7 +17,14 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import fs from "node:fs";
-import type { AddressInfo } from "node:net";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import { connect, type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -42,6 +49,84 @@ function isAddressInfo(
   value: AddressInfo | string | null,
 ): value is AddressInfo {
   return typeof value === "object" && value !== null && "port" in value;
+}
+
+/** Sends one GET to the loopback port with the given Host and Origin headers. */
+function requestWithHeaders(options: {
+  readonly headers: Record<string, string>;
+  readonly path: string;
+  readonly port: number;
+}): Promise<{ readonly body: string; readonly status: number | undefined }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        headers: options.headers,
+        host: "127.0.0.1",
+        path: options.path,
+        port: options.port,
+        setHost: false,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf-8");
+        res.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          resolve({ body, status: res.statusCode });
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Creates a real server whose `listen` records the requested host but binds loopback, so a test
+ * can prove which address the kit asked for without opening a port on other interfaces.
+ */
+function createHostRecordingServer(recorded: {
+  host: string | undefined;
+}): (listener: (req: IncomingMessage, res: ServerResponse) => void) => Server {
+  return (listener) => {
+    const server = createServer(listener);
+    const listen = server.listen.bind(server);
+    Object.defineProperty(server, "listen", {
+      value: (port: number, host: string, callback: () => void): Server => {
+        recorded.host = host;
+        return listen(port, "127.0.0.1", callback);
+      },
+    });
+    return server;
+  };
+}
+
+/** Sends a websocket upgrade request over a raw socket and returns everything the server wrote. */
+function requestUpgrade(options: {
+  readonly headers: Record<string, string>;
+  readonly port: number;
+}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(options.port, "127.0.0.1");
+    let received = "";
+    socket.setEncoding("utf-8");
+    socket.on("data", (chunk: string) => {
+      received += chunk;
+    });
+    socket.on("error", reject);
+    socket.on("close", () => {
+      resolve(received);
+    });
+    const headerLines = Object.entries({
+      Connection: "Upgrade",
+      "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+      "Sec-WebSocket-Version": "13",
+      Upgrade: "websocket",
+      ...options.headers,
+    }).map(([name, value]) => `${name}: ${value}`);
+    socket.write(`GET / HTTP/1.1\r\n${headerLines.join("\r\n")}\r\n\r\n`);
+  });
 }
 
 void test("LocalEdgeKit_stripLogsWebAnsi removes color escape sequences", () => {
@@ -196,4 +281,166 @@ void test("LocalEdgeKit_startLogsWebServer serves static HTML and health", async
 
   handle.close();
   assert.equal(closeCount, 1);
+});
+
+const guardedLogsWebOptions = {
+  defaultScope: "run" as const,
+  htmlPath: "/virtual/index.html",
+  logDirectory: "/virtual/logs/local-edge",
+  port: 0,
+  sourceDefinitions,
+  startupLines: [],
+  surfaceId: "logs-web",
+};
+
+const inertWebSocketServer = {
+  close: (): void => {},
+  onConnection: (): void => {},
+};
+
+void test("LocalEdgeKit_startLogsWebServer binds loopback when no bind host is given", async (t) => {
+  const handle = LocalEdgeKit_startLogsWebServer({
+    ...guardedLogsWebOptions,
+    createWebSocketServer: () => inertWebSocketServer,
+  });
+  t.after(() => {
+    handle.close();
+  });
+
+  await once(handle.server, "listening");
+  const address = handle.server.address();
+  assert.ok(isAddressInfo(address));
+  assert.equal(address.address, "127.0.0.1");
+});
+
+void test("LocalEdgeKit_startLogsWebServer rejects foreign Host and Origin headers", async (t) => {
+  const handle = LocalEdgeKit_startLogsWebServer({
+    ...guardedLogsWebOptions,
+    createWebSocketServer: () => inertWebSocketServer,
+    operations: { readText: () => "<h1>logs</h1>" },
+  });
+  t.after(() => {
+    handle.close();
+  });
+
+  await once(handle.server, "listening");
+  const address = handle.server.address();
+  assert.ok(isAddressInfo(address));
+  const port = address.port;
+  const ownHost = `127.0.0.1:${String(port)}`;
+
+  for (const path of ["/", "/health"]) {
+    const foreignHost = await requestWithHeaders({
+      headers: { Host: `attacker.example:${String(port)}` },
+      path,
+      port,
+    });
+    assert.equal(foreignHost.status, 403, path);
+    assert.equal(foreignHost.body, "Forbidden: Host header is not allowed");
+
+    const foreignOrigin = await requestWithHeaders({
+      headers: { Host: ownHost, Origin: "https://attacker.example" },
+      path,
+      port,
+    });
+    assert.equal(foreignOrigin.status, 403, path);
+    assert.equal(foreignOrigin.body, "Forbidden: cross-origin request");
+  }
+
+  const loopback = await requestWithHeaders({
+    headers: {
+      Host: `localhost:${String(port)}`,
+      Origin: `http://localhost:${String(port)}`,
+    },
+    path: "/",
+    port,
+  });
+  assert.equal(loopback.status, 200);
+  assert.equal(loopback.body, "<h1>logs</h1>");
+});
+
+void test("LocalEdgeKit_startLogsWebServer refuses foreign websocket upgrades before the adapter", async (t) => {
+  const adapterUpgrades: (string | undefined)[] = [];
+  const handle = LocalEdgeKit_startLogsWebServer({
+    ...guardedLogsWebOptions,
+    createWebSocketServer: (server) => {
+      // Stands in for a websocket library: it accepts any upgrade that still carries a key.
+      server.on("upgrade", (req, socket) => {
+        const key = req.headers["sec-websocket-key"];
+        adapterUpgrades.push(key);
+        if (key !== undefined) {
+          socket.end("HTTP/1.1 101 Switching Protocols\r\n\r\n");
+        }
+      });
+      return inertWebSocketServer;
+    },
+  });
+  t.after(() => {
+    handle.close();
+  });
+
+  await once(handle.server, "listening");
+  const address = handle.server.address();
+  assert.ok(isAddressInfo(address));
+  const port = address.port;
+  const ownHost = `127.0.0.1:${String(port)}`;
+
+  const foreignOrigin = await requestUpgrade({
+    headers: { Host: ownHost, Origin: "https://attacker.example" },
+    port,
+  });
+  assert.ok(foreignOrigin.startsWith("HTTP/1.1 403 Forbidden\r\n"));
+  assert.ok(foreignOrigin.endsWith("Forbidden: cross-origin request"));
+
+  const foreignHost = await requestUpgrade({
+    headers: { Host: `attacker.example:${String(port)}` },
+    port,
+  });
+  assert.ok(foreignHost.startsWith("HTTP/1.1 403 Forbidden\r\n"));
+  assert.ok(foreignHost.endsWith("Forbidden: Host header is not allowed"));
+  assert.deepEqual(adapterUpgrades, [undefined, undefined]);
+
+  const sameOrigin = await requestUpgrade({
+    headers: { Host: ownHost, Origin: `http://${ownHost}` },
+    port,
+  });
+  assert.ok(sameOrigin.startsWith("HTTP/1.1 101 Switching Protocols\r\n"));
+  assert.equal(adapterUpgrades.length, 3);
+  assert.notEqual(adapterUpgrades[2], undefined);
+});
+
+void test("LocalEdgeKit_startLogsWebServer binds a non-loopback host only when asked", async (t) => {
+  const recorded: { host: string | undefined } = { host: undefined };
+  const handle = LocalEdgeKit_startLogsWebServer({
+    ...guardedLogsWebOptions,
+    allowedHosts: ["logs.dev.example.test"],
+    bindHost: "0.0.0.0",
+    createWebSocketServer: () => inertWebSocketServer,
+    operations: { createServer: createHostRecordingServer(recorded) },
+  });
+  t.after(() => {
+    handle.close();
+  });
+
+  await once(handle.server, "listening");
+  assert.equal(recorded.host, "0.0.0.0");
+  const address = handle.server.address();
+  assert.ok(isAddressInfo(address));
+  const port = address.port;
+
+  const statuses: (number | undefined)[] = [];
+  for (const host of [
+    "logs.dev.example.test",
+    `127.0.0.1:${String(port)}`,
+    `0.0.0.0:${String(port)}`,
+    `attacker.example:${String(port)}`,
+  ]) {
+    const response = await requestWithHeaders({
+      headers: { Host: host },
+      path: "/health",
+      port,
+    });
+    statuses.push(response.status);
+  }
+  assert.deepEqual(statuses, [200, 200, 403, 403]);
 });

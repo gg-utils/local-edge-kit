@@ -23,7 +23,6 @@
  *
  * LocalEdgeKit_startHelperDashboardServer({
  *   autoOpen: false,
- *   bindHost: "0.0.0.0",
  *   htmlPath: "/abs/path/to/index.html",
  *   htmlTransform: (html) => html,
  *   openCommand: "open",
@@ -33,6 +32,11 @@
  *   surfaceId: "platform-status",
  * });
  * ```
+ *
+ * The server binds 127.0.0.1 unless `bindHost` is given. Every request must carry a Host header
+ * that names this server (a loopback name or the bind host on the listening port, the host of
+ * `subdomainUrl`, or an `allowedHosts` entry) and, when it has an Origin header, the origin of that
+ * same host; anything else gets a 403.
  *
  * @testing Node test runner: cd packages/local-edge-kit && node ../../node_modules/tsx/dist/cli.mjs --test src/helper-dashboard-server.unit.test.ts
  *
@@ -72,9 +76,18 @@ export type LocalEdgeKit_HelperDashboardServerOperations = {
 };
 /** Options for starting a helper-dashboard server. */
 export type LocalEdgeKit_StartHelperDashboardServerOptions = {
+    /**
+     * Extra `host` or `host:port` values accepted in the Host header, for a server reached through
+     * a reverse proxy under another name. The host of `subdomainUrl` is always accepted.
+     */
+    readonly allowedHosts?: readonly string[];
     readonly artifactEndpoint?: LocalEdgeKit_HelperDashboardArtifactEndpoint;
     readonly autoOpen: boolean;
-    readonly bindHost: string;
+    /**
+     * Address to listen on. Defaults to 127.0.0.1. Give another address, such as `0.0.0.0`, only
+     * when the server must be reachable from outside this machine (for example from a container).
+     */
+    readonly bindHost?: string;
     readonly htmlPath: string;
     readonly htmlTransform: (html: string) => string;
     readonly onRequestComplete?: (record: LocalEdgeKit_HelperDashboardRequestRecord) => void;
