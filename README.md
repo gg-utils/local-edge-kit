@@ -128,7 +128,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.2.0"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.3.0"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:
