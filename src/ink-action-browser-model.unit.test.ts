@@ -26,7 +26,7 @@ import {
   LocalEdgeKit_rotateInkSelectionIndex,
 } from "./ink-action-browser-model.js";
 
-test("local-edge Ink action browser model formats headers and selections", () => {
+void test("local-edge Ink action browser model formats headers and selections", () => {
   assert.equal(
     LocalEdgeKit_formatInkActionBrowserHeaderSummary({ projectRoot: "/repo" }),
     "Project: /repo | ↑/↓ Navigate | Enter Select | Esc Back | Q Quit",
@@ -41,7 +41,7 @@ test("local-edge Ink action browser model formats headers and selections", () =>
   );
 });
 
-test("local-edge Ink action browser model rotates selection indexes", () => {
+void test("local-edge Ink action browser model rotates selection indexes", () => {
   assert.equal(
     LocalEdgeKit_rotateInkSelectionIndex({
       currentIndex: 0,
@@ -68,7 +68,7 @@ test("local-edge Ink action browser model rotates selection indexes", () => {
   );
 });
 
-test("local-edge Ink action browser model maps risk and run status labels", () => {
+void test("local-edge Ink action browser model maps risk and run status labels", () => {
   assert.equal(LocalEdgeKit_getInkRiskTone("read-only"), "info");
   assert.equal(LocalEdgeKit_getInkRiskTone("mutating"), "warning");
   assert.equal(LocalEdgeKit_getInkRiskTone("destructive"), "error");
@@ -86,7 +86,7 @@ test("local-edge Ink action browser model maps risk and run status labels", () =
   );
 });
 
-test("local-edge Ink action browser model builds category and action rows", () => {
+void test("local-edge Ink action browser model builds category and action rows", () => {
   assert.deepEqual(
     LocalEdgeKit_buildInkCategoryRows({
       categories: [

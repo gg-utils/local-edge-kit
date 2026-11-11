@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 /**
  * @fileoverview Stub `local-edge-kit` package binary that refuses to run without a repository-owned
  * adapter that wires `local-edge.config.ts` into `LocalEdgeKit_runCli`.

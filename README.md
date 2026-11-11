@@ -101,7 +101,7 @@ npm run type-check
 npm test
 ```
 
-Scripts currently expect the source-first workspace toolchain.
+Run `npm ci --ignore-scripts` before development checks.
 
 ## Layout
 
@@ -122,3 +122,37 @@ Scripts currently expect the source-first workspace toolchain.
 - The kit plans and validates; adapters still own side effects and host-specific execution.
 - Project-specific URLs, labels, env names, route catalogs, and process commands must come from config.
 - The package depends on `@gg-utils/local-edge-core` and `@gg-utils/platform-logs-core`.
+
+## Use from another repository
+
+Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
+
+```json
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.2.0"
+```
+
+The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:
+
+```js
+import { LocalEdgeKit_runCli } from '@gg-utils/local-edge-kit/cli';
+import { config } from '../local-edge.config.js';
+process.exitCode = await LocalEdgeKit_runCli({ args: process.argv.slice(2), config });
+```
+
+Run `node scripts/local-edge.js status` (also `urls`, `healthcheck`, `dns-audit`). Supply `LocalEdgeKit_Config`, normally authored with `defineLocalEdgeConfig`: required `identity`, `router` and `surfaces`; optional command-specific env names, paths and lifecycle/runtime-launch settings. There is no implicit config discovery. These commands do not start an HTTP listener. To launch repository processes, a repository adapter explicitly calls `LocalEdgeKit_runRuntimeLaunchPipeline` with its runtime-launch config and implementation callbacks, or `LocalEdgeKit_runStartupCliCommand` with configured implementation scripts. Their commands, upstream ports, router ports and exposure addresses are defined by that repository's configuration.
+
+The optional helper HTTP APIs do start listeners. For example `scripts/dashboard.js` can contain:
+
+```js
+import { LocalEdgeKit_startHelperDashboardServer } from '@gg-utils/local-edge-kit/helper-dashboard-server';
+LocalEdgeKit_startHelperDashboardServer({
+  autoOpen: false, bindHost: '127.0.0.1', port: 9100,
+  htmlPath: new URL('../dashboard/index.html', import.meta.url).pathname,
+  htmlTransform: html => html, openCommand: 'open',
+  startupLines: [], subdomainUrl: 'http://127.0.0.1:9100/', surfaceId: 'dashboard',
+});
+```
+
+Run `node scripts/dashboard.js`. This example binds loopback port 9100; **the API has no default host or port**. Both are required and passed directly to Node's `server.listen`. Passing `0.0.0.0` or `::` binds beyond loopback. The dashboard serves the configured HTML file for non-API paths, `/api/status` JSON, and optionally one configured JSON artifact endpoint. It is not a directory browser.
+
+`LocalEdgeKit_startLogsWebServer` from `logs-web-server` likewise requires explicit `bindHost` and `port`, plus `htmlPath`, `logDirectory`, `defaultScope`, `sourceDefinitions`, `surfaceId`, `startupLines`, and a `createWebSocketServer(server)` adapter. It serves the configured HTML at `/` and `/index.html`, health JSON at `/health`, and configured log data over the supplied WebSocket implementation. Its handle exposes `close()`. The package does not supply HTML assets, a WebSocket implementation, or a default port/address. A consumer can choose loopback or non-loopback binding; neither server starts merely by importing this package. Port resolver helpers also require a consumer-supplied `defaultPort`, env names and flags.

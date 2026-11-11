@@ -1,3 +1,7 @@
+import type { ComponentType } from "react";
+import type { LocalEdgeKit_OpenTuiInputProps } from "./opentui-jsx.js";
+// OpenTUI supplies a terminal input host with string change events.
+const OpenTuiInput = "input" as unknown as ComponentType<LocalEdgeKit_OpenTuiInputProps>;
 /**
  * @fileoverview Reusable OpenTUI action-browser app for config-driven local-edge CLIs.
  *
@@ -132,7 +136,7 @@ function LocalEdgeKitOpenTuiActionBrowserForm<Model>({
           {screen.fields.map((field) => (
             <box key={field.label} style={{ flexDirection: "column" }}>
               <text>{field.label}</text>
-              <input
+              <OpenTuiInput
                 value={field.readValue(model)}
                 onChange={(value) => {
                   setModel((currentModel) =>
@@ -389,7 +393,7 @@ export function LocalEdgeKitOpenTuiActionBrowserApp<
           {actionMeta.requiresTypedConfirmation ? (
             <>
               <text color="red">Type YES to confirm destructive action</text>
-              <input
+              <OpenTuiInput
                 value={confirmYes}
                 onChange={(value) => setConfirmYes(value)}
               />

@@ -22,23 +22,23 @@ import type { LocalEdgeKit_Config } from "./config.js";
 /** Options for resolving an effective project root. */
 export type LocalEdgeKit_ResolveProjectRootOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 };
 
 /** Options for collecting env source files. */
 export type LocalEdgeKit_CollectActiveEnvSourceFilesOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  envFilePath?: string | null;
-  projectRoot?: string | null;
-  rootEnvFilePath?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  envFilePath?: string | null | undefined;
+  projectRoot?: string | null | undefined;
+  rootEnvFilePath?: string | null | undefined;
 };
 
 /** Options for loading env files into an environment object. */
 export type LocalEdgeKit_LoadActiveEnvFileStackOptions =
   LocalEdgeKit_CollectActiveEnvSourceFilesOptions & {
-    logPrefix?: string;
+    logPrefix?: string | undefined;
   };
 
 function LocalEdgeKit_projectRootEnvName(config: LocalEdgeKit_Config): string {
@@ -70,8 +70,8 @@ export function LocalEdgeKit_resolveProjectRoot(
 /** Returns the default `.env.local-edge` path for the effective project root. */
 export function LocalEdgeKit_defaultEnvFile(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): string {
   return path.join(
     LocalEdgeKit_resolveProjectRoot({

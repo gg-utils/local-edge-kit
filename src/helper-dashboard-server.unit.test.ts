@@ -41,7 +41,7 @@ function isAddressInfo(
   return typeof value === "object" && value !== null && "port" in value;
 }
 
-test("LocalEdgeKit_buildHelperDashboardSubdomainUrl omits default HTTPS port", () => {
+void test("LocalEdgeKit_buildHelperDashboardSubdomainUrl omits default HTTPS port", () => {
   assert.equal(
     LocalEdgeKit_buildHelperDashboardSubdomainUrl({
       developerSlug: "dev",
@@ -55,7 +55,7 @@ test("LocalEdgeKit_buildHelperDashboardSubdomainUrl omits default HTTPS port", (
   );
 });
 
-test("LocalEdgeKit_buildHelperDashboardSubdomainUrl includes non-default HTTPS port", () => {
+void test("LocalEdgeKit_buildHelperDashboardSubdomainUrl includes non-default HTTPS port", () => {
   assert.equal(
     LocalEdgeKit_buildHelperDashboardSubdomainUrl({
       developerSlug: "dev",
@@ -69,7 +69,7 @@ test("LocalEdgeKit_buildHelperDashboardSubdomainUrl includes non-default HTTPS p
   );
 });
 
-test("LocalEdgeKit_readHelperDashboardArtifactResponse returns JSON with optional CORS", () => {
+void test("LocalEdgeKit_readHelperDashboardArtifactResponse returns JSON with optional CORS", () => {
   const response = LocalEdgeKit_readHelperDashboardArtifactResponse({
     endpoint,
     origin: "https://example.test",
@@ -85,7 +85,7 @@ test("LocalEdgeKit_readHelperDashboardArtifactResponse returns JSON with optiona
   assert.equal(response.warningLine, undefined);
 });
 
-test("LocalEdgeKit_readHelperDashboardArtifactResponse distinguishes missing artifacts", () => {
+void test("LocalEdgeKit_readHelperDashboardArtifactResponse distinguishes missing artifacts", () => {
   const error = new Error("missing");
   Object.defineProperty(error, "code", { value: "ENOENT" });
   const response = LocalEdgeKit_readHelperDashboardArtifactResponse({
@@ -104,7 +104,7 @@ test("LocalEdgeKit_readHelperDashboardArtifactResponse distinguishes missing art
   assert.equal(response.warningLine, undefined);
 });
 
-test("LocalEdgeKit_startHelperDashboardServer serves status and transformed HTML", async (t) => {
+void test("LocalEdgeKit_startHelperDashboardServer serves status and transformed HTML", async (t) => {
   const completionRecords: LocalEdgeKit_HelperDashboardRequestRecord[] = [];
   const stdoutLines: string[] = [];
   let nowMs = 100;

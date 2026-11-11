@@ -308,12 +308,12 @@ export type LocalEdgeKit_RunHostCommandPlanOptions = {
 /** Full ensure-running lifecycle runner options. */
 export type LocalEdgeKit_RunEnsureRunningLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   executeHostCommandPlan?: (
     options: LocalEdgeKit_RunHostCommandPlanOptions,
   ) => number;
   hooks: LocalEdgeKit_EnsureRunningRuntimeHooks;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   stderr?: (line: string) => void;
   stdout?: (line: string) => void;
 };
@@ -321,14 +321,14 @@ export type LocalEdgeKit_RunEnsureRunningLifecycleOptions = {
 /** Full setup lifecycle runner options. */
 export type LocalEdgeKit_RunSetupLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   executeHostCommandPlan?: (
     options: LocalEdgeKit_RunHostCommandPlanOptions,
   ) => number;
   hooks?: Partial<LocalEdgeKit_SetupLifecycleHooks>;
   loggers?: Partial<LocalEdgeKit_SetupLifecycleLoggers>;
   now?: () => Date;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   stderr?: (line: string) => void;
   stdout?: (line: string) => void;
 };
@@ -336,36 +336,36 @@ export type LocalEdgeKit_RunSetupLifecycleOptions = {
 /** Full init lifecycle runner options. */
 export type LocalEdgeKit_RunInitLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   executeHostCommandPlan?: (
     options: LocalEdgeKit_RunHostCommandPlanOptions,
   ) => number;
   hooks?: Partial<LocalEdgeKit_InitLifecycleHooks>;
   isStdinTty?: boolean;
   loggers?: Partial<LocalEdgeKit_SetupLifecycleLoggers>;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   stderr?: (line: string) => void;
 };
 
 /** Full start lifecycle runner options. */
 export type LocalEdgeKit_RunStartLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   executeHostCommandPlan?: (
     options: LocalEdgeKit_RunHostCommandPlanOptions,
   ) => number;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   stderr?: (line: string) => void;
 };
 
 /** Full stop lifecycle runner options. */
 export type LocalEdgeKit_RunStopLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   hooks?: Partial<LocalEdgeKit_StopLifecycleHooks>;
   loggers?: Partial<LocalEdgeKit_StopLifecycleLoggers>;
   nowMs?: () => number;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   sleep?: () => void;
   stderr?: (line: string) => void;
   stdout?: (line: string) => void;
@@ -374,9 +374,9 @@ export type LocalEdgeKit_RunStopLifecycleOptions = {
 /** Full doctor lifecycle runner options. */
 export type LocalEdgeKit_RunDoctorLifecycleOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   hooks?: Partial<LocalEdgeKit_DoctorLifecycleHooks>;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   stderr?: (line: string) => void;
   stdout?: (line: string) => void;
 };
@@ -450,9 +450,9 @@ export type LocalEdgeKit_InitLifecycleHooks = {
 /** Options shared by lifecycle plan builders. */
 export type LocalEdgeKit_LifecyclePlanOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   method: string;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
 };
 
 function LocalEdgeKit_lifecycleEnvKeyForMethod(options: {
@@ -639,8 +639,8 @@ function LocalEdgeKit_startScriptNameForMethod(method: string): string | null {
 /** Resolves `startup-cli run init` env into file paths, flags, and post-write command plans. */
 export function LocalEdgeKit_resolveInitRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_InitRequest {
   const env = options.env ?? process.env;
   const projectRoot = LocalEdgeKit_resolveProjectRoot({
@@ -725,8 +725,8 @@ export function LocalEdgeKit_resolveInitRequest(options: {
 /** Resolves `startup-cli run doctor` env into flags, paths, and delegated script locations. */
 export function LocalEdgeKit_resolveDoctorRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_DoctorRequest {
   const env = options.env ?? process.env;
   const runtimeConfig = LocalEdgeKit_resolveRuntimeConfig({
@@ -843,8 +843,8 @@ export function LocalEdgeKit_resolveDoctorRequest(options: {
 /** Resolves `startup-cli run setup` env into a validated, host-operation-free setup plan. */
 export function LocalEdgeKit_resolveSetupRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_SetupRequestResult {
   const env = options.env ?? process.env;
   const method = env.LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD;
@@ -961,8 +961,8 @@ export function LocalEdgeKit_resolveSetupRequest(options: {
 /** Resolves `startup-cli run start` env into a validated method start command plan. */
 export function LocalEdgeKit_resolveStartRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_StartRequestResult {
   const env = options.env ?? process.env;
   const method = env.LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD;
@@ -1017,8 +1017,8 @@ export function LocalEdgeKit_resolveStartRequest(options: {
 /** Resolves `startup-cli run ensure-running` env into a validated lifecycle request. */
 export function LocalEdgeKit_resolveEnsureRunningRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_EnsureRunningRequestResult {
   const env = options.env ?? process.env;
   const method = env.LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD;
@@ -3255,8 +3255,8 @@ function LocalEdgeKit_ensureRunningWhenRunningNginxDocker(options: {
 /** Resolves `startup-cli run stop` env into method stop plans and stop-time policy. */
 export function LocalEdgeKit_resolveStopRequest(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_StopRequestResult {
   const env = options.env ?? process.env;
   const method = env.LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD;

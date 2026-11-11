@@ -44,14 +44,14 @@ function isAddressInfo(
   return typeof value === "object" && value !== null && "port" in value;
 }
 
-test("LocalEdgeKit_stripLogsWebAnsi removes color escape sequences", () => {
+void test("LocalEdgeKit_stripLogsWebAnsi removes color escape sequences", () => {
   assert.equal(
     LocalEdgeKit_stripLogsWebAnsi("\u001b[31mAPI ready\u001b[0m"),
     "API ready",
   );
 });
 
-test("LocalEdgeKit_classifyLogsWebSource maps configured prefixes", () => {
+void test("LocalEdgeKit_classifyLogsWebSource maps configured prefixes", () => {
   assert.equal(
     LocalEdgeKit_classifyLogsWebSource({
       line: "2026 API ready",
@@ -68,7 +68,7 @@ test("LocalEdgeKit_classifyLogsWebSource maps configured prefixes", () => {
   );
 });
 
-test("LocalEdgeKit_parseLogsWebLine strips ANSI and stamps classified rows", () => {
+void test("LocalEdgeKit_parseLogsWebLine strips ANSI and stamps classified rows", () => {
   assert.deepEqual(
     LocalEdgeKit_parseLogsWebLine({
       nowTimestamp: () => "12:34:56.789",
@@ -83,7 +83,7 @@ test("LocalEdgeKit_parseLogsWebLine strips ANSI and stamps classified rows", () 
   );
 });
 
-test("LocalEdgeKit_buildLogsWebSourceCountRows includes configured and OTHER rows", () => {
+void test("LocalEdgeKit_buildLogsWebSourceCountRows includes configured and OTHER rows", () => {
   const sourceCounts = new Map([
     ["API", 2],
     ["OTHER", 1],
@@ -103,7 +103,7 @@ test("LocalEdgeKit_buildLogsWebSourceCountRows includes configured and OTHER row
   );
 });
 
-test("LocalEdgeKit_discoverLogsWebFiles resolves run, router, and healthcheck logs", () => {
+void test("LocalEdgeKit_discoverLogsWebFiles resolves run, router, and healthcheck logs", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "logs-web-server-"));
   try {
     const logDirectory = path.join(tempDir, "logs", "local-edge");
@@ -132,7 +132,7 @@ test("LocalEdgeKit_discoverLogsWebFiles resolves run, router, and healthcheck lo
   }
 });
 
-test("LocalEdgeKit_startLogsWebServer serves static HTML and health", async (t) => {
+void test("LocalEdgeKit_startLogsWebServer serves static HTML and health", async (t) => {
   const completionRecords: LocalEdgeKit_LogsWebRequestRecord[] = [];
   const stdoutLines: string[] = [];
   let closeCount = 0;

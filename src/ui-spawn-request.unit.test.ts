@@ -81,7 +81,7 @@ const DEFAULT_OPTIONS = LocalEdgeKit_createDefaultUiResolveOptions({
   defaultReconcileMethod: "router-a",
 });
 
-test("local-edge UI spawn helpers build method-all and logs args", () => {
+void test("local-edge UI spawn helpers build method-all and logs args", () => {
   assert.deepEqual(
     LocalEdgeKit_buildUiMethodAllArgs({
       methodAll: true,
@@ -93,7 +93,7 @@ test("local-edge UI spawn helpers build method-all and logs args", () => {
   assert.deepEqual(LocalEdgeKit_buildUiLogsLineArgs("latest"), []);
 });
 
-test("local-edge UI spawn planner handles common descriptor families", () => {
+void test("local-edge UI spawn planner handles common descriptor families", () => {
   assert.deepEqual(
     LocalEdgeKit_buildUiSpawnRequest({
       actionId: "status",
@@ -191,7 +191,7 @@ test("local-edge UI spawn planner handles common descriptor families", () => {
   );
 });
 
-test("local-edge UI spawn planner rejects missing pool-next stack", () => {
+void test("local-edge UI spawn planner rejects missing pool-next stack", () => {
   assert.throws(
     () =>
       LocalEdgeKit_buildUiSpawnRequest({

@@ -60,8 +60,8 @@ export type LocalEdgeKit_StartupCliOperations = {
 export type LocalEdgeKit_RunStartupCliCommandOptions = {
   args: readonly string[];
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  operations?: LocalEdgeKit_StartupCliOperations;
+  env?: NodeJS.ProcessEnv | undefined;
+  operations?: LocalEdgeKit_StartupCliOperations | undefined;
   output?: LocalEdgeKit_StartupCliOutput;
 };
 
@@ -126,7 +126,7 @@ function LocalEdgeKit_startupImplementationDirectory(options: {
 /** Resolves a startup implementation file path from config and a historical implementation name. */
 export function LocalEdgeKit_resolveStartupImplPath(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   implBaseName: string;
 }): string {
   return path.join(
@@ -152,9 +152,9 @@ function LocalEdgeKit_startupImplBaseName(options: {
 /** Spawns one parsed startup command implementation using config-owned implementation paths. */
 export function LocalEdgeKit_spawnStartupImpl(options: {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   implBaseName?: string;
-  operations?: LocalEdgeKit_StartupCliOperations;
+  operations?: LocalEdgeKit_StartupCliOperations | undefined;
   output?: LocalEdgeKit_StartupCliOutput;
   parsed: LocalEdge_StartupCli_Parsed;
 }): number | null {
@@ -183,7 +183,7 @@ export function LocalEdgeKit_spawnStartupImpl(options: {
       ? options.parsed.forwardedArgs
       : undefined;
   const spawnPlan = LocalEdgeStartupCli_buildImplSpawnPlan({
-    extraArgs,
+    ...(extraArgs === undefined ? {} : { extraArgs }),
     implBaseName,
     implPath,
     parsed: options.parsed,

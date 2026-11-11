@@ -18,7 +18,7 @@ import test from "node:test";
 
 import { LocalEdgeKit_runDoctorCoreCli } from "./doctor-core-cli.js";
 
-test("LocalEdgeKit_runDoctorCoreCli prints registry summaries through injected I/O", () => {
+void test("LocalEdgeKit_runDoctorCoreCli prints registry summaries through injected I/O", () => {
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
   const exitCode = LocalEdgeKit_runDoctorCoreCli({
@@ -48,7 +48,7 @@ test("LocalEdgeKit_runDoctorCoreCli prints registry summaries through injected I
   ]);
 });
 
-test("LocalEdgeKit_runDoctorCoreCli returns usage errors without throwing", () => {
+void test("LocalEdgeKit_runDoctorCoreCli returns usage errors without throwing", () => {
   const stderrLines: string[] = [];
   const exitCode = LocalEdgeKit_runDoctorCoreCli({
     argv: ["unknown-command"],
@@ -64,7 +64,7 @@ test("LocalEdgeKit_runDoctorCoreCli returns usage errors without throwing", () =
   assert.match(stderrLines[0] ?? "", /^\[local-edge:doctor\]/);
 });
 
-test("LocalEdgeKit_runDoctorCoreCli verifies workspaces through injected file I/O", () => {
+void test("LocalEdgeKit_runDoctorCoreCli verifies workspaces through injected file I/O", () => {
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
   const exitCode = LocalEdgeKit_runDoctorCoreCli({
@@ -109,7 +109,7 @@ test("LocalEdgeKit_runDoctorCoreCli verifies workspaces through injected file I/
   ]);
 });
 
-test("LocalEdgeKit_runDoctorCoreCli reports missing registries before reading", () => {
+void test("LocalEdgeKit_runDoctorCoreCli reports missing registries before reading", () => {
   const stderrLines: string[] = [];
   const exitCode = LocalEdgeKit_runDoctorCoreCli({
     argv: [

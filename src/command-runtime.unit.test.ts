@@ -30,7 +30,7 @@ import {
   LocalEdgeKit_commandRuntimeValidateRequestedMethod,
 } from "./command-runtime.js";
 
-test("LocalEdgeKit command runtime resolves roots, defaults, and truthy values", () => {
+void test("LocalEdgeKit command runtime resolves roots, defaults, and truthy values", () => {
   assert.equal(
     LocalEdgeKit_commandRuntimeResolveProjectRoot({
       defaultProjectRoot: "/repo/default",
@@ -54,7 +54,7 @@ test("LocalEdgeKit command runtime resolves roots, defaults, and truthy values",
   );
 });
 
-test("LocalEdgeKit command runtime loads ordered env file stacks", () => {
+void test("LocalEdgeKit command runtime loads ordered env file stacks", () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-edge-kit-env-"));
   const firstFile = path.join(tmpDir, "first.env");
   const secondFile = path.join(tmpDir, "second.env");
@@ -74,7 +74,7 @@ test("LocalEdgeKit command runtime loads ordered env file stacks", () => {
   assert.equal(env.SHARED_KEY, "second");
 });
 
-test("LocalEdgeKit command runtime validates methods and script paths", () => {
+void test("LocalEdgeKit command runtime validates methods and script paths", () => {
   assert.equal(
     LocalEdgeKit_commandRuntimeValidateRequestedMethod({
       allowAll: true,

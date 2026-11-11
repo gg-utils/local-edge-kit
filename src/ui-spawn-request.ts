@@ -59,7 +59,7 @@ export type LocalEdgeKit_UiSpawnDescriptor =
   | { readonly kind: "logs-npm"; readonly npmScript: string }
   | { readonly kind: "method-all-npm"; readonly npmScript: string }
   | {
-      readonly args?: readonly string[];
+      readonly args?: readonly string[] | undefined;
       readonly kind: "npm";
       readonly npmScript: string;
     }

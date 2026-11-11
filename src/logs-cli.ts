@@ -90,7 +90,7 @@ export type LocalEdgeKit_LogsCliOutput = {
 /** Options for running the logs CLI. */
 export type LocalEdgeKit_RunLogsCliOptions = {
   argv: readonly string[];
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   operations?: Partial<LocalEdgeKit_LogsCliOperations>;
   output?: Partial<LocalEdgeKit_LogsCliOutput>;
   projectRoot: string;
@@ -567,7 +567,9 @@ export async function LocalEdgeKit_runLogsCli(
         env,
       );
       if (result.error !== undefined) {
-        throw result.error;
+        // Preserve the diagnostic coercion for injected history-tail failures.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        throw result.error instanceof Error ? result.error : new Error(String(result.error));
       }
       if (result.status !== 0 && result.status !== null) {
         return result.status;

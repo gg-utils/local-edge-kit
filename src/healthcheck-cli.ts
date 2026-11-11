@@ -135,7 +135,7 @@ export type LocalEdgeKit_HealthcheckProbeFunction = (options: {
 export type LocalEdgeKit_RunHealthcheckCommandOptions = {
   readonly args: readonly string[];
   readonly config: LocalEdgeKit_Config;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly env?: NodeJS.ProcessEnv | undefined;
   readonly output?: LocalEdgeKit_HealthcheckOutput;
   readonly probeSurface?: LocalEdgeKit_HealthcheckProbeFunction;
 };
@@ -317,7 +317,7 @@ async function LocalEdgeKit_readRegistryRealms(
 
   try {
     const rawRegistry = await fs.readFile(registryPath, "utf8");
-    const registry = JSON.parse(rawRegistry);
+    const registry: unknown = JSON.parse(rawRegistry);
     if (!LocalEdgeKit_isRecord(registry)) {
       throw new Error("[local-edge:healthcheck] Registry file must be an object.");
     }

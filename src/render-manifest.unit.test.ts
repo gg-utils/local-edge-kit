@@ -29,7 +29,7 @@ import test from "node:test";
 import { defineLocalEdgeConfig } from "./config.js";
 import { LocalEdgeKit_buildManifestFromConfig } from "./render-manifest.js";
 
-test("LocalEdgeKit_buildManifestFromConfig maps surfaces through render route groups", () => {
+void test("LocalEdgeKit_buildManifestFromConfig maps surfaces through render route groups", () => {
   const config = defineLocalEdgeConfig({
     identity: {
       defaultDeveloperSlug: "dev",

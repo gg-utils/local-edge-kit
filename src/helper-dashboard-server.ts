@@ -122,7 +122,7 @@ type LocalEdgeKit_HelperDashboardJsonResponse = {
   readonly body: string;
   readonly headers: Record<string, string>;
   readonly statusCode: number;
-  readonly warningLine?: string;
+  readonly warningLine?: string | undefined;
 };
 
 const LocalEdgeKit_defaultHelperDashboardOperations =

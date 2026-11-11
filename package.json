@@ -1,102 +1,101 @@
 {
   "name": "@gg-utils/local-edge-kit",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "description": "Reusable local-edge command kit for project-owned local-edge.config.ts adapters.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./cli": {
-      "types": "./src/cli.ts",
-      "default": "./src/cli.ts"
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
     },
     "./config": {
-      "types": "./src/config.ts",
-      "default": "./src/config.ts"
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
     },
     "./dns-audit-cli": {
-      "types": "./src/dns-audit-cli.ts",
-      "default": "./src/dns-audit-cli.ts"
+      "types": "./dist/dns-audit-cli.d.ts",
+      "default": "./dist/dns-audit-cli.js"
     },
     "./env": {
-      "types": "./src/env.ts",
-      "default": "./src/env.ts"
+      "types": "./dist/env.d.ts",
+      "default": "./dist/env.js"
     },
     "./healthcheck-cli": {
-      "types": "./src/healthcheck-cli.ts",
-      "default": "./src/healthcheck-cli.ts"
+      "types": "./dist/healthcheck-cli.d.ts",
+      "default": "./dist/healthcheck-cli.js"
     },
     "./interactive-action-menu": {
-      "types": "./src/interactive-action-menu.ts",
-      "default": "./src/interactive-action-menu.ts"
+      "types": "./dist/interactive-action-menu.d.ts",
+      "default": "./dist/interactive-action-menu.js"
     },
     "./ink-action-browser-model": {
-      "types": "./src/ink-action-browser-model.ts",
-      "default": "./src/ink-action-browser-model.ts"
+      "types": "./dist/ink-action-browser-model.d.ts",
+      "default": "./dist/ink-action-browser-model.js"
     },
     "./ink-action-browser-app": {
-      "types": "./src/ink-action-browser-app.tsx",
-      "default": "./src/ink-action-browser-app.tsx"
+      "types": "./dist/ink-action-browser-app.d.ts",
+      "default": "./dist/ink-action-browser-app.js"
     },
     "./helper-server-config": {
-      "types": "./src/helper-server-config.ts",
-      "default": "./src/helper-server-config.ts"
+      "types": "./dist/helper-server-config.d.ts",
+      "default": "./dist/helper-server-config.js"
     },
     "./helper-dashboard-server": {
-      "types": "./src/helper-dashboard-server.ts",
-      "default": "./src/helper-dashboard-server.ts"
+      "types": "./dist/helper-dashboard-server.d.ts",
+      "default": "./dist/helper-dashboard-server.js"
     },
     "./runtime-config": {
-      "types": "./src/runtime-config.ts",
-      "default": "./src/runtime-config.ts"
+      "types": "./dist/runtime-config.d.ts",
+      "default": "./dist/runtime-config.js"
     },
     "./runtime-launch": {
-      "types": "./src/runtime-launch.ts",
-      "default": "./src/runtime-launch.ts"
+      "types": "./dist/runtime-launch.d.ts",
+      "default": "./dist/runtime-launch.js"
     },
     "./status-cli": {
-      "types": "./src/status-cli.ts",
-      "default": "./src/status-cli.ts"
+      "types": "./dist/status-cli.d.ts",
+      "default": "./dist/status-cli.js"
     },
     "./url-matrix": {
-      "types": "./src/url-matrix.ts",
-      "default": "./src/url-matrix.ts"
+      "types": "./dist/url-matrix.d.ts",
+      "default": "./dist/url-matrix.js"
     },
     "./urls-cli": {
-      "types": "./src/urls-cli.ts",
-      "default": "./src/urls-cli.ts"
+      "types": "./dist/urls-cli.d.ts",
+      "default": "./dist/urls-cli.js"
     },
     "./package.json": "./package.json",
     "./startup-cli": {
-      "types": "./src/startup-cli.ts",
-      "default": "./src/startup-cli.ts"
+      "types": "./dist/startup-cli.d.ts",
+      "default": "./dist/startup-cli.js"
     },
     "./lifecycle-plans": {
-      "types": "./src/lifecycle-plans.ts",
-      "default": "./src/lifecycle-plans.ts"
+      "types": "./dist/lifecycle-plans.d.ts",
+      "default": "./dist/lifecycle-plans.js"
     },
     "./logs-cli": {
-      "types": "./src/logs-cli.ts",
-      "default": "./src/logs-cli.ts"
+      "types": "./dist/logs-cli.d.ts",
+      "default": "./dist/logs-cli.js"
     },
     "./logs-web-server": {
-      "types": "./src/logs-web-server.ts",
-      "default": "./src/logs-web-server.ts"
+      "types": "./dist/logs-web-server.d.ts",
+      "default": "./dist/logs-web-server.js"
     },
     "./opentui-action-browser-model": {
-      "types": "./src/opentui-action-browser-model.ts",
-      "default": "./src/opentui-action-browser-model.ts"
+      "types": "./dist/opentui-action-browser-model.d.ts",
+      "default": "./dist/opentui-action-browser-model.js"
     },
     "./opentui-action-browser-app": {
-      "types": "./src/opentui-action-browser-app.tsx",
-      "default": "./src/opentui-action-browser-app.tsx"
+      "types": "./dist/opentui-action-browser-app.d.ts",
+      "default": "./dist/opentui-action-browser-app.js"
     },
     "./shell/with-logs-runner.sh": "./shell/with-logs-runner.sh",
     "./shell/runtime-stop-lib.sh": "./shell/runtime-stop-lib.sh",
@@ -108,50 +107,67 @@
     "./shell/start-nginx-docker-runner.sh": "./shell/start-nginx-docker-runner.sh",
     "./shell/start-all-runner.sh": "./shell/start-all-runner.sh",
     "./docker-host": {
-      "types": "./src/docker-host.ts",
-      "default": "./src/docker-host.ts"
+      "types": "./dist/docker-host.d.ts",
+      "default": "./dist/docker-host.js"
     },
     "./command-runtime": {
-      "types": "./src/command-runtime.ts",
-      "default": "./src/command-runtime.ts"
+      "types": "./dist/command-runtime.d.ts",
+      "default": "./dist/command-runtime.js"
     },
     "./doctor-core-cli": {
-      "types": "./src/doctor-core-cli.ts",
-      "default": "./src/doctor-core-cli.ts"
+      "types": "./dist/doctor-core-cli.d.ts",
+      "default": "./dist/doctor-core-cli.js"
     },
     "./ui-launcher": {
-      "types": "./src/ui-launcher.ts",
-      "default": "./src/ui-launcher.ts"
+      "types": "./dist/ui-launcher.d.ts",
+      "default": "./dist/ui-launcher.js"
     },
     "./ui-action-catalog": {
-      "types": "./src/ui-action-catalog.ts",
-      "default": "./src/ui-action-catalog.ts"
+      "types": "./dist/ui-action-catalog.d.ts",
+      "default": "./dist/ui-action-catalog.js"
     },
     "./ui-spawn-request": {
-      "types": "./src/ui-spawn-request.ts",
-      "default": "./src/ui-spawn-request.ts"
+      "types": "./dist/ui-spawn-request.d.ts",
+      "default": "./dist/ui-spawn-request.js"
     }
   },
   "bin": {
-    "local-edge-kit": "./src/bin/local-edge-kit.ts"
+    "local-edge-kit": "./dist/bin/local-edge-kit.js"
   },
   "files": [
-    "src/",
-    "shell/",
+    "dist/",
     "README.md",
-    "tsconfig.json"
+    "LICENSE",
+    "shell/"
   ],
   "engines": {
-    "node": ">=24.11.1 <25",
+    "node": ">=22.0.0 <27",
     "npm": ">=9.0.0"
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {
-    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#main",
-    "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#main"
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#v0.2.0",
+    "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#v0.2.0",
+    "ink": "6.8.0",
+    "react": "19.3.1"
   },
   "scripts": {
-    "type-check": "node ../../node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
-    "test": "node ../../node_modules/tsx/dist/cli.mjs --test \"src/**/*.unit.test.ts\""
+    "build": "tsc -p tsconfig.build.json",
+    "type-check": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test \"src/**/*.unit.test.ts\"",
+    "lint": "eslint --max-warnings 0 .",
+    "check:dist": "node scripts/check-dist.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gg-utils/local-edge-kit.git"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "eslint": "9.39.5",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2"
   }
 }

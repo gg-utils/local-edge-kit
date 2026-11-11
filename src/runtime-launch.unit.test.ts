@@ -399,7 +399,7 @@ async function waitForRuntimeLaunchTestChildExit(): Promise<void> {
   });
 }
 
-test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls uses configured startup surfaces", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls uses configured startup surfaces", () => {
   const rows = LocalEdgeKit_buildRuntimeLaunchSurfaceUrls({
     config: runtimeLaunchConfig,
     projectRoot: "/tmp/example",
@@ -428,11 +428,12 @@ test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls uses configured startup surface
   );
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls defaults to URL-matrix surfaces", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls defaults to URL-matrix surfaces", () => {
+  const baseConfig = { ...runtimeLaunchConfig };
+  delete baseConfig.runtimeLaunch;
   const rows = LocalEdgeKit_buildRuntimeLaunchSurfaceUrls({
     config: {
-      ...runtimeLaunchConfig,
-      runtimeLaunch: undefined,
+      ...baseConfig,
       surfaces: [
         ...runtimeLaunchConfig.surfaces,
         {
@@ -459,12 +460,12 @@ test("LocalEdgeKit_buildRuntimeLaunchSurfaceUrls defaults to URL-matrix surfaces
   );
 });
 
-test("LocalEdgeKit_shellQuoteSingle preserves runtime shell escaping", () => {
+void test("LocalEdgeKit_shellQuoteSingle preserves runtime shell escaping", () => {
   assert.equal(LocalEdgeKit_shellQuoteSingle(""), "''");
   assert.equal(LocalEdgeKit_shellQuoteSingle("a'b"), `'a'\"'\"''b'`);
 });
 
-test("LocalEdgeKit_checkRuntimeLaunchCommandAvailable probes PATH", () => {
+void test("LocalEdgeKit_checkRuntimeLaunchCommandAvailable probes PATH", () => {
   assert.equal(
     LocalEdgeKit_checkRuntimeLaunchCommandAvailable({
       name: process.execPath,
@@ -479,7 +480,7 @@ test("LocalEdgeKit_checkRuntimeLaunchCommandAvailable probes PATH", () => {
   );
 });
 
-test("LocalEdgeKit_runtimeLaunchExitCodeFromChildProcessEvent normalizes signals", () => {
+void test("LocalEdgeKit_runtimeLaunchExitCodeFromChildProcessEvent normalizes signals", () => {
   assert.equal(
     LocalEdgeKit_runtimeLaunchExitCodeFromChildProcessEvent(7, null),
     7,
@@ -498,13 +499,13 @@ test("LocalEdgeKit_runtimeLaunchExitCodeFromChildProcessEvent normalizes signals
   );
 });
 
-test("LocalEdgeKit_parseRuntimeLaunchChildPid rejects invalid pid text", () => {
+void test("LocalEdgeKit_parseRuntimeLaunchChildPid rejects invalid pid text", () => {
   assert.equal(LocalEdgeKit_parseRuntimeLaunchChildPid(""), null);
   assert.equal(LocalEdgeKit_parseRuntimeLaunchChildPid("abc"), null);
   assert.equal(LocalEdgeKit_parseRuntimeLaunchChildPid("123"), 123);
 });
 
-test("LocalEdgeKit_runRuntimeLaunchCommandSync returns child exit status", () => {
+void test("LocalEdgeKit_runRuntimeLaunchCommandSync returns child exit status", () => {
   const result = LocalEdgeKit_runRuntimeLaunchCommandSync({
     command: {
       command: process.execPath,
@@ -519,7 +520,7 @@ test("LocalEdgeKit_runRuntimeLaunchCommandSync returns child exit status", () =>
   assert.equal(result.status, 7);
 });
 
-test("LocalEdgeKit_runRuntimeLaunchLoggedCommandSync writes command output", () => {
+void test("LocalEdgeKit_runRuntimeLaunchLoggedCommandSync writes command output", () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "local-edge-kit-runtime-launch-"),
   );
@@ -544,7 +545,7 @@ test("LocalEdgeKit_runRuntimeLaunchLoggedCommandSync writes command output", () 
   }
 });
 
-test("LocalEdgeKit_runRuntimeLaunchDelegationPhase returns delegated exit code", () => {
+void test("LocalEdgeKit_runRuntimeLaunchDelegationPhase returns delegated exit code", () => {
   const projectRoot = process.cwd();
   const config: LocalEdgeKit_Config = {
     ...runtimeLaunchConfig,
@@ -580,7 +581,7 @@ test("LocalEdgeKit_runRuntimeLaunchDelegationPhase returns delegated exit code",
   assert.deepEqual(logLines, ["delegating"]);
 });
 
-test("LocalEdgeKit_runRuntimeLaunchWorkspaceRegistrationPhase returns registered realm", () => {
+void test("LocalEdgeKit_runRuntimeLaunchWorkspaceRegistrationPhase returns registered realm", () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "local-edge-kit-registration-"),
   );
@@ -631,7 +632,7 @@ test("LocalEdgeKit_runRuntimeLaunchWorkspaceRegistrationPhase returns registered
   }
 });
 
-test("LocalEdgeKit_runRuntimeLaunchRenderArtifactsPhase runs logged render command", () => {
+void test("LocalEdgeKit_runRuntimeLaunchRenderArtifactsPhase runs logged render command", () => {
   const tempDir = mkdtempSync(path.join(tmpdir(), "local-edge-kit-render-"));
   try {
     const config: LocalEdgeKit_Config = {
@@ -668,7 +669,7 @@ test("LocalEdgeKit_runRuntimeLaunchRenderArtifactsPhase runs logged render comma
   }
 });
 
-test("LocalEdgeKit_runRuntimeLaunchEnsureInfrastructurePhase returns failure status", () => {
+void test("LocalEdgeKit_runRuntimeLaunchEnsureInfrastructurePhase returns failure status", () => {
   const projectRoot = process.cwd();
   const config: LocalEdgeKit_Config = {
     ...runtimeLaunchConfig,
@@ -704,7 +705,7 @@ test("LocalEdgeKit_runRuntimeLaunchEnsureInfrastructurePhase returns failure sta
   ]);
 });
 
-test("LocalEdgeKit_runRuntimeLaunchRuntimeAuditPhase returns strict audit failure", () => {
+void test("LocalEdgeKit_runRuntimeLaunchRuntimeAuditPhase returns strict audit failure", () => {
   const projectRoot = process.cwd();
   const statusScriptPath = path.join(projectRoot, "tools/status.ts");
   const config: LocalEdgeKit_Config = {
@@ -743,7 +744,7 @@ test("LocalEdgeKit_runRuntimeLaunchRuntimeAuditPhase returns strict audit failur
   });
 });
 
-test("LocalEdgeKit_runRuntimeLaunchStartupReportPhase emits report lines", () => {
+void test("LocalEdgeKit_runRuntimeLaunchStartupReportPhase emits report lines", () => {
   const logLines: string[] = [];
   const result = LocalEdgeKit_runRuntimeLaunchStartupReportPhase({
     config: runtimeLaunchConfig,
@@ -772,7 +773,7 @@ test("LocalEdgeKit_runRuntimeLaunchStartupReportPhase emits report lines", () =>
   );
 });
 
-test("LocalEdgeKit_runRuntimeLaunchPlatformWithOverlaysPhase returns overlay failure before launching", async () => {
+void test("LocalEdgeKit_runRuntimeLaunchPlatformWithOverlaysPhase returns overlay failure before launching", async () => {
   const errorLines: string[] = [];
   const logLines: string[] = [];
   const result = await LocalEdgeKit_runRuntimeLaunchPlatformWithOverlaysPhase({
@@ -804,7 +805,7 @@ test("LocalEdgeKit_runRuntimeLaunchPlatformWithOverlaysPhase returns overlay fai
   ]);
 });
 
-test("LocalEdgeKit_startRuntimeLaunchBackgroundHealthPhase returns child pid", async () => {
+void test("LocalEdgeKit_startRuntimeLaunchBackgroundHealthPhase returns child pid", async () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "local-edge-kit-health-phase-"),
   );
@@ -864,7 +865,7 @@ test("LocalEdgeKit_startRuntimeLaunchBackgroundHealthPhase returns child pid", a
   }
 });
 
-test("LocalEdgeKit_startRuntimeLaunchActiveEnvWatcherPhase returns child pid", async () => {
+void test("LocalEdgeKit_startRuntimeLaunchActiveEnvWatcherPhase returns child pid", async () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "local-edge-kit-watcher-phase-"),
   );
@@ -904,7 +905,7 @@ test("LocalEdgeKit_startRuntimeLaunchActiveEnvWatcherPhase returns child pid", a
   }
 });
 
-test("LocalEdgeKit_applyRuntimeLaunchHostOverridePhase mutates configured env", () => {
+void test("LocalEdgeKit_applyRuntimeLaunchHostOverridePhase mutates configured env", () => {
   const env: NodeJS.ProcessEnv = {
     HOST: "127.0.0.1",
     WEB_LISTEN_HOST: "0.0.0.0",
@@ -925,7 +926,7 @@ test("LocalEdgeKit_applyRuntimeLaunchHostOverridePhase mutates configured env", 
   ]);
 });
 
-test("LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase returns report exit code", () => {
+void test("LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase returns report exit code", () => {
   const result = LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase({
     config: runtimeLaunchConfig,
     env: {},
@@ -949,7 +950,7 @@ test("LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase returns report exit code
   });
 });
 
-test("LocalEdgeKit_runRuntimeLaunchCleanupPhase runs configured cleanup commands", () => {
+void test("LocalEdgeKit_runRuntimeLaunchCleanupPhase runs configured cleanup commands", () => {
   const tempDir = mkdtempSync(
     path.join(tmpdir(), "local-edge-kit-cleanup-phase-"),
   );
@@ -996,7 +997,7 @@ test("LocalEdgeKit_runRuntimeLaunchCleanupPhase runs configured cleanup commands
   }
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchNpmDevShellCommand quotes env and prefix values", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchNpmDevShellCommand quotes env and prefix values", () => {
   assert.equal(
     LocalEdgeKit_buildRuntimeLaunchNpmDevShellCommand({
       prefixFolder: "app folder",
@@ -1009,7 +1010,7 @@ test("LocalEdgeKit_buildRuntimeLaunchNpmDevShellCommand quotes env and prefix va
   );
 });
 
-test("LocalEdgeKit_resolveRuntimeLaunchOverlayPath prefers realm overlays", () => {
+void test("LocalEdgeKit_resolveRuntimeLaunchOverlayPath prefers realm overlays", () => {
   assert.equal(
     LocalEdgeKit_resolveRuntimeLaunchOverlayPath({
       appName: "web",
@@ -1033,7 +1034,7 @@ test("LocalEdgeKit_resolveRuntimeLaunchOverlayPath prefers realm overlays", () =
   );
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchPackageEnvFileList uses configured env names", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchPackageEnvFileList uses configured env names", () => {
   assert.equal(
     LocalEdgeKit_buildRuntimeLaunchPackageEnvFileList({
       config: runtimeLaunchConfig,
@@ -1044,7 +1045,7 @@ test("LocalEdgeKit_buildRuntimeLaunchPackageEnvFileList uses configured env name
   );
 });
 
-test("LocalEdgeKit_readRuntimeLaunchPackageDependencyNames parses dependency sections", () => {
+void test("LocalEdgeKit_readRuntimeLaunchPackageDependencyNames parses dependency sections", () => {
   assert.deepEqual(
     LocalEdgeKit_readRuntimeLaunchPackageDependencyNames(
       JSON.stringify({
@@ -1060,7 +1061,7 @@ test("LocalEdgeKit_readRuntimeLaunchPackageDependencyNames parses dependency sec
   );
 });
 
-test("LocalEdgeKit_findMissingRuntimeLaunchNpmDeps skips configured internal prefixes", () => {
+void test("LocalEdgeKit_findMissingRuntimeLaunchNpmDeps skips configured internal prefixes", () => {
   const existingPaths = new Set([
     "/repo/app/package.json",
     "/repo/node_modules/present",
@@ -1085,7 +1086,7 @@ test("LocalEdgeKit_findMissingRuntimeLaunchNpmDeps skips configured internal pre
   assert.deepEqual(missing, ["missing"]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDirectUpstreamUrls uses configured direct surfaces", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDirectUpstreamUrls uses configured direct surfaces", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchDirectUpstreamUrls({
     config: runtimeLaunchConfig,
     env: {
@@ -1110,7 +1111,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDirectUpstreamUrls uses configured direct s
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan resolves required overlays and env lists", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan resolves required overlays and env lists", () => {
   const existingPaths = new Set([
     "/tmp/machine/realms/feature/env/api-app.env",
     "/tmp/generated/env/web-app.env",
@@ -1150,7 +1151,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan resolves required overlays a
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan reports missing required overlays", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan reports missing required overlays", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1167,7 +1168,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan reports missing required ove
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchProcessCommandsPlan builds npm and shell commands", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchProcessCommandsPlan builds npm and shell commands", () => {
   const overlayPlan = LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1202,7 +1203,7 @@ test("LocalEdgeKit_buildRuntimeLaunchProcessCommandsPlan builds npm and shell co
   );
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchOpenOnStartPlan builds optional helper command", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchOpenOnStartPlan builds optional helper command", () => {
   const overlayPlan = LocalEdgeKit_buildRuntimeLaunchDevOverlayPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1237,7 +1238,7 @@ test("LocalEdgeKit_buildRuntimeLaunchOpenOnStartPlan builds optional helper comm
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan builds stop and realm inactive commands", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan builds stop and realm inactive commands", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchCleanupPlan({
     config: runtimeLaunchConfig,
     pathExists: (filePath) => filePath === "/repo/tools/stop.ts",
@@ -1257,7 +1258,7 @@ test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan builds stop and realm inactive 
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan omits absent optional stop script", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan omits absent optional stop script", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchCleanupPlan({
     config: runtimeLaunchConfig,
     pathExists: () => false,
@@ -1271,7 +1272,7 @@ test("LocalEdgeKit_buildRuntimeLaunchCleanupPlan omits absent optional stop scri
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchWorkspaceRegistrationPlan builds command, env, and logs", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchWorkspaceRegistrationPlan builds command, env, and logs", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchWorkspaceRegistrationPlan({
     config: runtimeLaunchConfigWithCustomEnvNames,
     env: {
@@ -1300,7 +1301,7 @@ test("LocalEdgeKit_buildRuntimeLaunchWorkspaceRegistrationPlan builds command, e
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchRenderArtifactsPlan builds render command", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchRenderArtifactsPlan builds render command", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchRenderArtifactsPlan({
     config: runtimeLaunchConfigWithCustomEnvNames,
     env: {
@@ -1320,7 +1321,7 @@ test("LocalEdgeKit_buildRuntimeLaunchRenderArtifactsPlan builds render command",
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchEnsureInfrastructurePlan builds startup command", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchEnsureInfrastructurePlan builds startup command", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchEnsureInfrastructurePlan({
     config: runtimeLaunchConfigWithCustomEnvNames,
     env: {
@@ -1352,7 +1353,7 @@ test("LocalEdgeKit_buildRuntimeLaunchEnsureInfrastructurePlan builds startup com
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchSigintStopPlan builds runtime-stop shell command", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchSigintStopPlan builds runtime-stop shell command", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchSigintStopPlan({
     config: runtimeLaunchConfig,
     projectRoot: "/repo",
@@ -1381,7 +1382,7 @@ test("LocalEdgeKit_buildRuntimeLaunchSigintStopPlan builds runtime-stop shell co
   );
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan resolves env file and generated paths", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan resolves env file and generated paths", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1402,7 +1403,7 @@ test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan resolves env file and gener
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan respects env overrides", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan respects env overrides", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan({
     config: runtimeLaunchConfigWithCustomEnvNames,
     env: {
@@ -1421,7 +1422,7 @@ test("LocalEdgeKit_buildRuntimeLaunchEnvironmentPlan respects env overrides", ()
   assert.equal(plan.envFileLoadedLogLine, null);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchSplitUpstreamPortsPlan resolves split and combined ports", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchSplitUpstreamPortsPlan resolves split and combined ports", () => {
   const splitPlan = LocalEdgeKit_buildRuntimeLaunchSplitUpstreamPortsPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1458,7 +1459,7 @@ test("LocalEdgeKit_buildRuntimeLaunchSplitUpstreamPortsPlan resolves split and c
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchHostOverridePlan builds process env override", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchHostOverridePlan builds process env override", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchHostOverridePlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1475,7 +1476,7 @@ test("LocalEdgeKit_buildRuntimeLaunchHostOverridePlan builds process env overrid
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan builds command when guard exists", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan builds command when guard exists", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchDelegationPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1492,7 +1493,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan builds command when guard ex
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan skips absent guard and bypass env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan skips absent guard and bypass env", () => {
   const absentGuardPlan = LocalEdgeKit_buildRuntimeLaunchDelegationPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1518,7 +1519,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDelegationPlan skips absent guard and bypas
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchStartupReportPlan renders direct and edge URL lines", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchStartupReportPlan renders direct and edge URL lines", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchStartupReportPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1553,7 +1554,7 @@ test("LocalEdgeKit_buildRuntimeLaunchStartupReportPlan renders direct and edge U
   );
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan builds status and DNS commands", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan builds status and DNS commands", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1592,7 +1593,7 @@ test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan builds status and DNS comm
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan supports configured disable env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan supports configured disable env", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1611,7 +1612,7 @@ test("LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan supports configured disabl
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan builds monitor command", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan builds monitor command", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1656,7 +1657,7 @@ test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan builds monitor command
   });
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan supports configured disable env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan supports configured disable env", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1676,7 +1677,7 @@ test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan supports configured di
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan builds watcher command and env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan builds watcher command and env", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan({
     config: runtimeLaunchConfig,
     env: {},
@@ -1702,7 +1703,7 @@ test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan builds watcher command
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan supports configured disable env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan supports configured disable env", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan({
     config: runtimeLaunchConfig,
     env: {
@@ -1720,7 +1721,7 @@ test("LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan supports configured di
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport renders failures from configured packages", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport renders failures from configured packages", () => {
   const packageJsonByPath = new Map([
     [
       "/repo/apps/api/package.json",
@@ -1769,7 +1770,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport renders failures from
   assert.ok(report.logLines.includes("   SKIP_DEPS=true npm run start"));
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport supports configured skip env", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport supports configured skip env", () => {
   const report = LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport({
     config: runtimeLaunchConfig,
     env: { SKIP_DEPS: "true" },
@@ -1788,7 +1789,7 @@ test("LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport supports configured s
   ]);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan filters by split mode and optional paths", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan filters by split mode and optional paths", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan({
     config: runtimeLaunchConfig,
     projectRoot: "/repo",
@@ -1820,7 +1821,7 @@ test("LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan filters by split mode 
   assert.deepEqual(plan.missingCommandProcessIds, []);
 });
 
-test("LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan reports missing required commands", () => {
+void test("LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan reports missing required commands", () => {
   const plan = LocalEdgeKit_buildRuntimeLaunchConcurrentlyArgsPlan({
     config: runtimeLaunchConfig,
     projectRoot: "/repo",

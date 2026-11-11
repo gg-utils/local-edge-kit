@@ -64,8 +64,8 @@ export type LocalEdgeKit_RuntimeConfig = {
 /** Options for resolving runtime config. */
 export type LocalEdgeKit_ResolveRuntimeConfigOptions = {
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
 };
 
 function LocalEdgeKit_generatedDirEnvName(config: LocalEdgeKit_Config): string {

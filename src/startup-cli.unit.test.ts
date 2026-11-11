@@ -60,7 +60,7 @@ function createStartupConfig() {
   });
 }
 
-test("LocalEdgeKit_runStartupCliCommand renders configured usage", () => {
+void test("LocalEdgeKit_runStartupCliCommand renders configured usage", () => {
   const logs: string[] = [];
   const exitCode = LocalEdgeKit_runStartupCliCommand({
     args: ["--help"],
@@ -85,7 +85,7 @@ test("LocalEdgeKit_runStartupCliCommand renders configured usage", () => {
   );
 });
 
-test("LocalEdgeKit_runStartupCliCommand plans and spawns configured impls", () => {
+void test("LocalEdgeKit_runStartupCliCommand plans and spawns configured impls", () => {
   const spawnRequests: LocalEdgeKit_StartupCliSpawnRequest[] = [];
   const operations: LocalEdgeKit_StartupCliOperations = {
     pathExists(filePath) {
@@ -132,7 +132,7 @@ test("LocalEdgeKit_runStartupCliCommand plans and spawns configured impls", () =
   );
 });
 
-test("LocalEdgeKit_runStartupCliCommand returns usage errors without spawning", () => {
+void test("LocalEdgeKit_runStartupCliCommand returns usage errors without spawning", () => {
   const errors: string[] = [];
   const exitCode = LocalEdgeKit_runStartupCliCommand({
     args: ["run", "start", "--", "--unknown"],

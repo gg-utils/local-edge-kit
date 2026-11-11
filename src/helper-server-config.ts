@@ -59,7 +59,7 @@ export type LocalEdgeKit_ResolveHelperServerPortOptions = {
   readonly canonicalRealmSlug: string;
   readonly defaultPort: number;
   readonly env: Record<string, string | undefined>;
-  readonly operations?: Partial<LocalEdgeKit_HelperServerConfigOperations>;
+  readonly operations?: Partial<LocalEdgeKit_HelperServerConfigOperations> | undefined;
   readonly portEnvName: string;
   readonly portFlags: readonly string[];
   readonly realmSlugEnvName: string;
@@ -138,7 +138,7 @@ export function LocalEdgeKit_stripHelperServerEnvValue(
 export function LocalEdgeKit_readHelperServerEnvFileValue(options: {
   readonly envFilePath: string | null;
   readonly key: string;
-  readonly operations?: Partial<LocalEdgeKit_HelperServerConfigOperations>;
+  readonly operations?: Partial<LocalEdgeKit_HelperServerConfigOperations> | undefined;
 }): string | null {
   const operations = LocalEdgeKit_helperServerOperations(options.operations);
   if (!options.envFilePath || !operations.exists(options.envFilePath)) {

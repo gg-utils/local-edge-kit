@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks a commit whose message names the earlier platform or its UI.
+exec "$(git rev-parse --show-toplevel)/scripts/check-forbidden-names.sh" text < "$1"

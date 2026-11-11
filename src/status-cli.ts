@@ -38,7 +38,7 @@ import {
 export type LocalEdgeKit_RunStatusCommandOptions = {
   args: readonly string[];
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
 };
 
 function LocalEdgeKit_statusCommandLabel(config: LocalEdgeKit_Config): string {

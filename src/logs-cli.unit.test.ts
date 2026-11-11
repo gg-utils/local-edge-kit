@@ -26,7 +26,7 @@ class LocalEdgeKit_TestTailChild implements LocalEdgeKit_LogsTailChild {
   signalCode: NodeJS.Signals | null = null;
   private exitListener: (() => void) | null = null;
 
-  kill(_signal: NodeJS.Signals): void {
+  kill(): void {
     this.exitCode = 0;
     this.exitListener?.();
   }
@@ -42,7 +42,7 @@ class LocalEdgeKit_TestTailChild implements LocalEdgeKit_LogsTailChild {
   }
 }
 
-test("LocalEdgeKit_runLogsCli lists run logs through injected discovery", async () => {
+void test("LocalEdgeKit_runLogsCli lists run logs through injected discovery", async () => {
   const lines: string[] = [];
   const exitCode = await LocalEdgeKit_runLogsCli({
     argv: ["list-runs"],
@@ -64,7 +64,7 @@ test("LocalEdgeKit_runLogsCli lists run logs through injected discovery", async 
   assert.deepEqual(lines, ["1. /repo/logs/local-edge/runs/local-edge-2.log"]);
 });
 
-test("LocalEdgeKit_runLogsCli prints history with package-owned tail args", async () => {
+void test("LocalEdgeKit_runLogsCli prints history with package-owned tail args", async () => {
   const lines: string[] = [];
   const historyArgs: string[][] = [];
   const exitCode = await LocalEdgeKit_runLogsCli({
@@ -98,7 +98,7 @@ test("LocalEdgeKit_runLogsCli prints history with package-owned tail args", asyn
   ]);
 });
 
-test("LocalEdgeKit_runLogsCli follows static scopes with injected tail process", async () => {
+void test("LocalEdgeKit_runLogsCli follows static scopes with injected tail process", async () => {
   const lines: string[] = [];
   const tailArgs: string[][] = [];
   const child = new LocalEdgeKit_TestTailChild();

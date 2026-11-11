@@ -104,13 +104,14 @@ async function createTempRoot(): Promise<{
   return { generatedDir, projectRoot };
 }
 
-test("LocalEdgeKit_runHealthcheckCommand probes compatibility fallback realms", async () => {
+void test("LocalEdgeKit_runHealthcheckCommand probes compatibility fallback realms", async () => {
   const { generatedDir, projectRoot } = await createTempRoot();
   const logs: string[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
   const probedUrls: string[] = [];
   const probeSurface: LocalEdgeKit_HealthcheckProbeFunction = async (probe) => {
+ await Promise.resolve();
     probedUrls.push(probe.url);
     return {
       realmSlug: probe.realmSlug,
@@ -165,7 +166,7 @@ test("LocalEdgeKit_runHealthcheckCommand probes compatibility fallback realms", 
     logs.some((line) => line.includes("SKIPPED surface=optional-tool")),
   );
 
-  const aggregateArtifact = JSON.parse(
+  const aggregateArtifact: unknown = JSON.parse(
     await fs.readFile(
       path.join(
         projectRoot,
@@ -177,11 +178,11 @@ test("LocalEdgeKit_runHealthcheckCommand probes compatibility fallback realms", 
       "utf8",
     ),
   );
-  assert.equal(aggregateArtifact.failedProbeCount, 0);
-  assert.equal(aggregateArtifact.probes[0].upstreamPort, 3000);
+  assert.deepEqual((aggregateArtifact as { failedProbeCount: unknown }).failedProbeCount, 0);
+  assert.equal((aggregateArtifact as { probes: { upstreamPort: number }[] }).probes[0]?.upstreamPort, 3000);
 });
 
-test("LocalEdgeKit_runHealthcheckCommand reads registry realms and writes per-realm artifacts", async () => {
+void test("LocalEdgeKit_runHealthcheckCommand reads registry realms and writes per-realm artifacts", async () => {
   const { generatedDir, projectRoot } = await createTempRoot();
   const realmRoot = path.join(generatedDir, "realms", "alpha");
   await fs.mkdir(path.join(generatedDir, "registry"), { recursive: true });
@@ -232,6 +233,7 @@ test("LocalEdgeKit_runHealthcheckCommand reads registry realms and writes per-re
       },
     },
     async probeSurface(probe) {
+ await Promise.resolve();
       return {
         realmSlug: probe.realmSlug,
         method: probe.method,
@@ -251,9 +253,9 @@ test("LocalEdgeKit_runHealthcheckCommand reads registry realms and writes per-re
   });
 
   assert.equal(exitCode, 0);
-  const realmArtifact = JSON.parse(
+  const realmArtifact: unknown = JSON.parse(
     await fs.readFile(path.join(realmRoot, "health.json"), "utf8"),
   );
-  assert.equal(realmArtifact.realmSlug, "alpha");
-  assert.equal(realmArtifact.probes[0].upstreamPort, 4100);
+  assert.deepEqual((realmArtifact as { realmSlug: unknown }).realmSlug, "alpha");
+  assert.equal((realmArtifact as { probes: { upstreamPort: number }[] }).probes[0]?.upstreamPort, 4100);
 });
