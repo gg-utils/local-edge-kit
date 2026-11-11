@@ -135,7 +135,7 @@ function LifecyclePlans_testCommandRole(
   return "unknown";
 }
 
-test("LocalEdgeKit_buildStartNginxDockerPlan derives compose start commands", () => {
+void test("LocalEdgeKit_buildStartNginxDockerPlan derives compose start commands", () => {
   const plan = LocalEdgeKit_buildStartNginxDockerPlan({
     config: exampleConfig,
     method: "nginx-docker",
@@ -158,7 +158,7 @@ test("LocalEdgeKit_buildStartNginxDockerPlan derives compose start commands", ()
   );
 });
 
-test("LocalEdgeKit_buildStartNginxDockerPlan preserves command overrides", () => {
+void test("LocalEdgeKit_buildStartNginxDockerPlan preserves command overrides", () => {
   const plan = LocalEdgeKit_buildStartNginxDockerPlan({
     config: exampleConfig,
     method: "nginx-docker",
@@ -180,7 +180,7 @@ test("LocalEdgeKit_buildStartNginxDockerPlan preserves command overrides", () =>
   assert.match(assignments, /TIMEOUT_SECONDS='45'/);
 });
 
-test("LocalEdgeKit_buildStopMethodPlan derives stop commands and paths", () => {
+void test("LocalEdgeKit_buildStopMethodPlan derives stop commands and paths", () => {
   const plan = LocalEdgeKit_buildStopMethodPlan({
     config: exampleConfig,
     method: "nginx-docker",
@@ -203,7 +203,7 @@ test("LocalEdgeKit_buildStopMethodPlan derives stop commands and paths", () => {
   });
 });
 
-test("LocalEdgeKit_resolveStartRequest builds a method start command plan", () => {
+void test("LocalEdgeKit_resolveStartRequest builds a method start command plan", () => {
   const result = LocalEdgeKit_resolveStartRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -223,7 +223,7 @@ test("LocalEdgeKit_resolveStartRequest builds a method start command plan", () =
   }
 });
 
-test("LocalEdgeKit_resolveStartRequest reports missing method env", () => {
+void test("LocalEdgeKit_resolveStartRequest reports missing method env", () => {
   const result = LocalEdgeKit_resolveStartRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -240,7 +240,7 @@ test("LocalEdgeKit_resolveStartRequest reports missing method env", () => {
   }
 });
 
-test("LocalEdgeKit_runStartLifecycle executes the resolved start plan", () => {
+void test("LocalEdgeKit_runStartLifecycle executes the resolved start plan", () => {
   const roles: string[] = [];
   const exitCode = LocalEdgeKit_runStartLifecycle({
     config: exampleConfig,
@@ -258,7 +258,7 @@ test("LocalEdgeKit_runStartLifecycle executes the resolved start plan", () => {
   assert.deepEqual(roles, ["start"]);
 });
 
-test("LocalEdgeKit_resolveStopRequest expands all configured methods", () => {
+void test("LocalEdgeKit_resolveStopRequest expands all configured methods", () => {
   const result = LocalEdgeKit_resolveStopRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -285,7 +285,7 @@ test("LocalEdgeKit_resolveStopRequest expands all configured methods", () => {
   }
 });
 
-test("LocalEdgeKit_runStopLifecycle stops methods and writes artifacts", () => {
+void test("LocalEdgeKit_runStopLifecycle stops methods and writes artifacts", () => {
   const infoLines: string[] = [];
   const warningLines: string[] = [];
   const stdoutLines: string[] = [];
@@ -349,7 +349,7 @@ test("LocalEdgeKit_runStopLifecycle stops methods and writes artifacts", () => {
   ]);
 });
 
-test("LocalEdgeKit_runStopLifecycle force-kills listeners when configured", () => {
+void test("LocalEdgeKit_runStopLifecycle force-kills listeners when configured", () => {
   let listenChecks = 0;
   let nowMs = 0;
   const killedPorts: number[] = [];
@@ -404,7 +404,7 @@ test("LocalEdgeKit_runStopLifecycle force-kills listeners when configured", () =
   ]);
 });
 
-test("LocalEdgeKit_resolveStopRequest warns and defaults invalid timeouts", () => {
+void test("LocalEdgeKit_resolveStopRequest warns and defaults invalid timeouts", () => {
   const result = LocalEdgeKit_resolveStopRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -424,7 +424,7 @@ test("LocalEdgeKit_resolveStopRequest warns and defaults invalid timeouts", () =
   }
 });
 
-test("LocalEdgeKit_resolveEnsureRunningRequest validates startup env", () => {
+void test("LocalEdgeKit_resolveEnsureRunningRequest validates startup env", () => {
   const result = LocalEdgeKit_resolveEnsureRunningRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -496,7 +496,7 @@ test("LocalEdgeKit_resolveEnsureRunningRequest validates startup env", () => {
   }
 });
 
-test("LocalEdgeKit_resolveEnsureRunningRequest reports missing method env", () => {
+void test("LocalEdgeKit_resolveEnsureRunningRequest reports missing method env", () => {
   const result = LocalEdgeKit_resolveEnsureRunningRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -513,7 +513,7 @@ test("LocalEdgeKit_resolveEnsureRunningRequest reports missing method env", () =
   }
 });
 
-test("LocalEdgeKit_runEnsureRunningLifecycle cold-starts inactive method", () => {
+void test("LocalEdgeKit_runEnsureRunningLifecycle cold-starts inactive method", () => {
   const commandRoles: string[] = [];
   const stdoutLines: string[] = [];
   const statusResults = [1, 0];
@@ -565,7 +565,7 @@ test("LocalEdgeKit_runEnsureRunningLifecycle cold-starts inactive method", () =>
   );
 });
 
-test("LocalEdgeKit_runEnsureRunningLifecycle recreates stale running method", () => {
+void test("LocalEdgeKit_runEnsureRunningLifecycle recreates stale running method", () => {
   const commandRoles: string[] = [];
   const stdoutLines: string[] = [];
   const result = LocalEdgeKit_runEnsureRunningLifecycle({
@@ -613,7 +613,7 @@ test("LocalEdgeKit_runEnsureRunningLifecycle recreates stale running method", ()
   );
 });
 
-test("LocalEdgeKit_resolveSetupRequest builds a host-operation-free setup plan", () => {
+void test("LocalEdgeKit_resolveSetupRequest builds a host-operation-free setup plan", () => {
   const result = LocalEdgeKit_resolveSetupRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -652,7 +652,7 @@ test("LocalEdgeKit_resolveSetupRequest builds a host-operation-free setup plan",
   }
 });
 
-test("LocalEdgeKit_runSetupLifecycle validates overlays and writes setup artifact", () => {
+void test("LocalEdgeKit_runSetupLifecycle validates overlays and writes setup artifact", () => {
   const commands: string[] = [];
   const infoLines: string[] = [];
   const warningLines: string[] = [];
@@ -721,7 +721,7 @@ test("LocalEdgeKit_runSetupLifecycle validates overlays and writes setup artifac
   ]);
 });
 
-test("LocalEdgeKit_runSetupLifecycle fails strict setup before overlay validation", () => {
+void test("LocalEdgeKit_runSetupLifecycle fails strict setup before overlay validation", () => {
   const commands: string[] = [];
   const warnings: string[] = [];
   const env: NodeJS.ProcessEnv = {
@@ -762,7 +762,7 @@ test("LocalEdgeKit_runSetupLifecycle fails strict setup before overlay validatio
   assert.deepEqual(warnings, ["Required utility not found: npx"]);
 });
 
-test("LocalEdgeKit_resolveInitRequest derives files, flags, and post-write commands", () => {
+void test("LocalEdgeKit_resolveInitRequest derives files, flags, and post-write commands", () => {
   const request = LocalEdgeKit_resolveInitRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -817,7 +817,7 @@ test("LocalEdgeKit_resolveInitRequest derives files, flags, and post-write comma
   });
 });
 
-test("LocalEdgeKit_resolveInitRequest uses configured env file variable names", () => {
+void test("LocalEdgeKit_resolveInitRequest uses configured env file variable names", () => {
   const request = LocalEdgeKit_resolveInitRequest({
     config: {
       ...exampleConfig,
@@ -837,7 +837,7 @@ test("LocalEdgeKit_resolveInitRequest uses configured env file variable names", 
   assert.equal(request.promptDeveloperSlug, "auto");
 });
 
-test("LocalEdgeKit_runInitLifecycle normalizes and writes env values", async () => {
+void test("LocalEdgeKit_runInitLifecycle normalizes and writes env values", async () => {
   const files = new Map<string, string>([
     [
       "/tmp/example/config/.env.local-edge.example",
@@ -913,7 +913,7 @@ test("LocalEdgeKit_runInitLifecycle normalizes and writes env values", async () 
   );
 });
 
-test("LocalEdgeKit_runInitLifecycle prompts and runs render setup checks", async () => {
+void test("LocalEdgeKit_runInitLifecycle prompts and runs render setup checks", async () => {
   const files = new Map<string, string>([
     [
       "/tmp/example/.env.local-edge",
@@ -975,7 +975,7 @@ test("LocalEdgeKit_runInitLifecycle prompts and runs render setup checks", async
   );
 });
 
-test("LocalEdgeKit_resolveDoctorRequest resolves flags and script paths", () => {
+void test("LocalEdgeKit_resolveDoctorRequest resolves flags and script paths", () => {
   const request = LocalEdgeKit_resolveDoctorRequest({
     config: exampleConfig,
     projectRoot: "/tmp/example",
@@ -1012,7 +1012,7 @@ test("LocalEdgeKit_resolveDoctorRequest resolves flags and script paths", () => 
   );
 });
 
-test("LocalEdgeKit_runDoctorLifecycle runs skipped diagnostics without host mutations", () => {
+void test("LocalEdgeKit_runDoctorLifecycle runs skipped diagnostics without host mutations", () => {
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
   const tsxCalls: string[] = [];
@@ -1069,7 +1069,7 @@ test("LocalEdgeKit_runDoctorLifecycle runs skipped diagnostics without host muta
   ]);
 });
 
-test("LocalEdgeKit_runDoctorLifecycle returns strict failure from delegated checks", () => {
+void test("LocalEdgeKit_runDoctorLifecycle returns strict failure from delegated checks", () => {
   const stderrLines: string[] = [];
   const tsxCalls: string[] = [];
   const env: NodeJS.ProcessEnv = {

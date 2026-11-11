@@ -79,7 +79,7 @@ function LocalEdgeKit_dockerHostResolveMethodFacts(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   method: string;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
 }): LocalEdgeKit_DockerHostMethodFacts {
   if (options.method !== "nginx-docker") {
     return { kind: "unsupported" };
@@ -417,7 +417,7 @@ export function LocalEdgeDocker_runStopCommand(options: {
 /** Creates default Docker-backed ensure-running hooks for lifecycle adapters. */
 export function LocalEdgeKit_createDockerHostEnsureRunningHooks(options: {
   config: LocalEdgeKit_Config;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
   routerHostProbe: (options: {
     routerProbe: LocalEdgeKit_EnsureRunningRouterProbe;
   }) => boolean;

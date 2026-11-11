@@ -45,7 +45,7 @@ function createDockerHostConfig() {
   });
 }
 
-test("LocalEdgeKit_createDockerHostEnsureRunningHooks delegates router probes and ignores unsupported methods", () => {
+void test("LocalEdgeKit_createDockerHostEnsureRunningHooks delegates router probes and ignores unsupported methods", () => {
   const hooks = LocalEdgeKit_createDockerHostEnsureRunningHooks({
     config: createDockerHostConfig(),
     projectRoot: "/tmp/example-project",

@@ -26,7 +26,7 @@ function isDemoActionId(value: string): value is "status" | "urls" {
   return value === "status" || value === "urls";
 }
 
-test("LocalEdgeKit_parseUiLaunchArgv parses print modes and project root", () => {
+void test("LocalEdgeKit_parseUiLaunchArgv parses print modes and project root", () => {
   assert.deepEqual(
     LocalEdgeKit_parseUiLaunchArgv({
       argv: ["--project-root", "/repo", "--print-command", "status"],
@@ -43,7 +43,7 @@ test("LocalEdgeKit_parseUiLaunchArgv parses print modes and project root", () =>
   );
 });
 
-test("LocalEdgeKit_parseUiLaunchArgv rejects unknown action ids", () => {
+void test("LocalEdgeKit_parseUiLaunchArgv rejects unknown action ids", () => {
   assert.throws(
     () =>
       LocalEdgeKit_parseUiLaunchArgv({
@@ -56,7 +56,7 @@ test("LocalEdgeKit_parseUiLaunchArgv rejects unknown action ids", () => {
   );
 });
 
-test("LocalEdgeKit_parseUiLaunchArgv accepts OpenTUI print-plan alias", () => {
+void test("LocalEdgeKit_parseUiLaunchArgv accepts OpenTUI print-plan alias", () => {
   assert.deepEqual(
     LocalEdgeKit_parseUiLaunchArgv({
       argv: ["--print-plan", "urls"],
@@ -73,7 +73,7 @@ test("LocalEdgeKit_parseUiLaunchArgv accepts OpenTUI print-plan alias", () => {
   );
 });
 
-test("LocalEdgeKit_formatUiLaunchHelpText includes examples", () => {
+void test("LocalEdgeKit_formatUiLaunchHelpText includes examples", () => {
   const helpText = LocalEdgeKit_formatUiLaunchHelpText({
     examples: ["npm run local:edge:cli:test -- --print-command status"],
     invocation: "npm run local:edge:cli:test",

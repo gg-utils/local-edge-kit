@@ -27,7 +27,7 @@ import {
   LocalEdgeKit_shouldRunOpenTuiPreviewAction,
 } from "./opentui-action-browser-model.js";
 
-test("OpenTUI action browser model builds navigation rows", () => {
+void test("OpenTUI action browser model builds navigation rows", () => {
   assert.deepEqual(LocalEdgeKit_buildOpenTuiNavOptions({ includeBack: true }), [
     { description: "Back", name: "Back", value: "back" },
     { description: "Quit (SIGINT)", name: "Quit", value: "quit" },
@@ -46,7 +46,7 @@ test("OpenTUI action browser model builds navigation rows", () => {
   );
 });
 
-test("OpenTUI action browser model builds category and action options", () => {
+void test("OpenTUI action browser model builds category and action options", () => {
   assert.deepEqual(
     LocalEdgeKit_buildOpenTuiCategoryOptions({
       categories: [
@@ -84,7 +84,7 @@ test("OpenTUI action browser model builds category and action options", () => {
   );
 });
 
-test("OpenTUI action browser model builds preview/result rows", () => {
+void test("OpenTUI action browser model builds preview/result rows", () => {
   assert.deepEqual(LocalEdgeKit_buildOpenTuiPreviewOptions(), [
     { description: "Execute", name: "Run", value: "run" },
     { description: "Action list", name: "Back", value: "back" },
@@ -95,7 +95,7 @@ test("OpenTUI action browser model builds preview/result rows", () => {
   ]);
 });
 
-test("OpenTUI action browser model resolves action phases and confirmation policy", () => {
+void test("OpenTUI action browser model resolves action phases and confirmation policy", () => {
   assert.equal(
     LocalEdgeKit_resolveOpenTuiPhaseForActionSpecial({ special: "init" }),
     "init",

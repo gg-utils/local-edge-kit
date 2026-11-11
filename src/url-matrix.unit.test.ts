@@ -22,7 +22,7 @@ import { defineLocalEdgeConfig } from "./config.js";
 import { LocalEdgeKit_resolveRuntimeConfig } from "./runtime-config.js";
 import { LocalEdgeKit_buildUrlMatrixLines } from "./url-matrix.js";
 
-test("LocalEdgeKit_buildUrlMatrixLines renders configured surfaces and paths", () => {
+void test("LocalEdgeKit_buildUrlMatrixLines renders configured surfaces and paths", () => {
   const config = defineLocalEdgeConfig({
     identity: {
       defaultDeveloperSlug: "dev",
@@ -86,7 +86,7 @@ test("LocalEdgeKit_buildUrlMatrixLines renders configured surfaces and paths", (
   );
 });
 
-test("LocalEdgeKit_resolveRuntimeConfig rejects unsupported configured methods", () => {
+void test("LocalEdgeKit_resolveRuntimeConfig rejects unsupported configured methods", () => {
   const config = defineLocalEdgeConfig({
     identity: {
       defaultDeveloperSlug: "dev",

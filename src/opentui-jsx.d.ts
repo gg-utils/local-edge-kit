@@ -52,14 +52,8 @@ type LocalEdgeKit_OpenTuiContainerProps = {
   readonly style?: LocalEdgeKit_OpenTuiStyle;
 };
 
-type LocalEdgeKit_OpenTuiTextProps = {
-  readonly children?: ReactNode;
-  readonly color?: string;
-  readonly key?: Key;
-  readonly style?: LocalEdgeKit_OpenTuiStyle;
-};
 
-type LocalEdgeKit_OpenTuiInputProps = {
+export type LocalEdgeKit_OpenTuiInputProps = {
   readonly key?: Key;
   readonly onChange?: (value: string) => void;
   readonly value: string;
@@ -79,9 +73,7 @@ declare global {
   namespace JSX {
     interface IntrinsicElements {
       box: LocalEdgeKit_OpenTuiContainerProps;
-      input: LocalEdgeKit_OpenTuiInputProps;
       scrollbox: LocalEdgeKit_OpenTuiContainerProps;
-      text: LocalEdgeKit_OpenTuiTextProps;
       "tab-select": LocalEdgeKit_OpenTuiSelectProps;
     }
   }
@@ -91,9 +83,7 @@ declare module "react" {
   namespace JSX {
     interface IntrinsicElements {
       box: LocalEdgeKit_OpenTuiContainerProps;
-      input: LocalEdgeKit_OpenTuiInputProps;
       scrollbox: LocalEdgeKit_OpenTuiContainerProps;
-      text: LocalEdgeKit_OpenTuiTextProps;
       "tab-select": LocalEdgeKit_OpenTuiSelectProps;
     }
   }
@@ -103,9 +93,7 @@ declare module "react/jsx-runtime" {
   namespace JSX {
     interface IntrinsicElements {
       box: LocalEdgeKit_OpenTuiContainerProps;
-      input: LocalEdgeKit_OpenTuiInputProps;
       scrollbox: LocalEdgeKit_OpenTuiContainerProps;
-      text: LocalEdgeKit_OpenTuiTextProps;
       "tab-select": LocalEdgeKit_OpenTuiSelectProps;
     }
   }

@@ -62,9 +62,9 @@ export type LocalEdgeKit_RuntimeLaunchSurfaceUrl = {
 export type LocalEdgeKit_BuildRuntimeLaunchSurfaceUrlsOptions = {
   commandLabel?: string;
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   method?: string;
-  projectRoot?: string | null;
+  projectRoot?: string | null | undefined;
 };
 
 /** Dependencies read from a package manifest for runtime-launch install checks. */
@@ -355,7 +355,7 @@ export function LocalEdgeKit_parseRuntimeLaunchChildPid(
 /** Best-effort SIGTERM teardown for background runtime-launch helper PIDs. */
 export function LocalEdgeKit_tryTerminateRuntimeLaunchChildPid(options: {
   label: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   pidStr: string;
 }): boolean {
   const pid = LocalEdgeKit_parseRuntimeLaunchChildPid(options.pidStr);
@@ -502,7 +502,7 @@ export async function LocalEdgeKit_waitForRuntimeLaunchConcurrentlyExit(options:
       stdio: "inherit",
     },
   );
-  const [code, signal] = await once(concurrentlyProc, "exit");
+  const [code, signal] = await once(concurrentlyProc, "exit") as unknown[];
   const exitCode = typeof code === "number" ? code : null;
   const exitSignal =
     signal === "SIGINT" || signal === "SIGTERM" ? signal : null;
@@ -516,7 +516,7 @@ export async function LocalEdgeKit_waitForRuntimeLaunchConcurrentlyExit(options:
 export function LocalEdgeKit_runRuntimeLaunchDelegationPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   pathExists: (filePath: string) => boolean;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPhaseResult {
@@ -550,7 +550,7 @@ export function LocalEdgeKit_runRuntimeLaunchDelegationPhase(options: {
 export function LocalEdgeKit_runRuntimeLaunchWorkspaceRegistrationPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchWorkspaceRegistrationPhaseResult {
   const registrationPlan =
@@ -625,7 +625,7 @@ export function LocalEdgeKit_runRuntimeLaunchRenderArtifactsPhase(options: {
 export function LocalEdgeKit_runRuntimeLaunchEnsureInfrastructurePhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPhaseResult {
   const ensurePlan = LocalEdgeKit_buildRuntimeLaunchEnsureInfrastructurePlan({
@@ -657,7 +657,7 @@ export function LocalEdgeKit_runRuntimeLaunchRuntimeAuditPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   fallbackMethod: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPhaseResult {
   const auditPlan = LocalEdgeKit_buildRuntimeLaunchRuntimeAuditPlan({
@@ -716,7 +716,7 @@ export function LocalEdgeKit_runRuntimeLaunchStartupReportPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   errorLine?: (line: string) => void;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPhaseResult {
   const startupReportPlan = LocalEdgeKit_buildRuntimeLaunchStartupReportPlan({
@@ -750,7 +750,7 @@ export function LocalEdgeKit_startRuntimeLaunchBackgroundHealthPhase(options: {
   fallbackMethod: string;
   fallbackRealm: string;
   logDir: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPidPhaseResult {
   const healthPlan = LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan({
@@ -809,7 +809,7 @@ export function LocalEdgeKit_startRuntimeLaunchActiveEnvWatcherPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   logDir: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   projectRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPidPhaseResult {
   const watcherPlan = LocalEdgeKit_buildRuntimeLaunchActiveEnvWatcherPlan({
@@ -855,7 +855,7 @@ export function LocalEdgeKit_startRuntimeLaunchActiveEnvWatcherPhase(options: {
 export function LocalEdgeKit_applyRuntimeLaunchHostOverridePhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
 }): void {
   const hostOverridePlan = LocalEdgeKit_buildRuntimeLaunchHostOverridePlan({
     config: options.config,
@@ -882,7 +882,7 @@ export function LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   filesystem: LocalEdgeKit_RuntimeLaunchFilesystem;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   repoRoot: string;
 }): LocalEdgeKit_RuntimeLaunchPhaseResult {
   const report = LocalEdgeKit_buildRuntimeLaunchDependencyCheckReport({
@@ -904,7 +904,7 @@ export function LocalEdgeKit_runRuntimeLaunchCleanupPhase(options: {
   config: LocalEdgeKit_Config;
   env: NodeJS.ProcessEnv;
   healthPid: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   pathExists: (filePath: string) => boolean;
   projectRoot: string;
   registeredRealmSlug: string | null;
@@ -966,7 +966,7 @@ export async function LocalEdgeKit_runRuntimeLaunchPlatformWithOverlaysPhase(opt
   env: NodeJS.ProcessEnv;
   errorLine?: (line: string) => void;
   generatedEnvDir: string;
-  logLine?: (line: string) => void;
+  logLine?: ((line: string) => void) | undefined;
   machineRoot: string;
   method: string;
   pathExists: (filePath: string) => boolean;
@@ -1418,7 +1418,7 @@ export function LocalEdgeKit_readRuntimeLaunchPackageDependencyNames(
   }
   const names = new Set<string>();
   for (const section of ["dependencies", "devDependencies"]) {
-    const dependencies = Object.entries(parsed).find(
+    const dependencies: unknown = Object.entries(parsed).find(
       ([key]) => key === section,
     )?.[1];
     if (typeof dependencies !== "object" || dependencies === null) {

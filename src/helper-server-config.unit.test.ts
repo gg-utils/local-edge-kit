@@ -32,7 +32,7 @@ const baseOptions = {
   serviceLabel: "helper-web",
 };
 
-test("LocalEdgeKit_resolveHelperServerPort prefers CLI flags", () => {
+void test("LocalEdgeKit_resolveHelperServerPort prefers CLI flags", () => {
   assert.deepEqual(
     LocalEdgeKit_resolveHelperServerPort({
       ...baseOptions,
@@ -47,7 +47,7 @@ test("LocalEdgeKit_resolveHelperServerPort prefers CLI flags", () => {
   );
 });
 
-test("LocalEdgeKit_resolveHelperServerPort reads active env files before process env", () => {
+void test("LocalEdgeKit_resolveHelperServerPort reads active env files before process env", () => {
   assert.deepEqual(
     LocalEdgeKit_resolveHelperServerPort({
       ...baseOptions,
@@ -62,7 +62,7 @@ test("LocalEdgeKit_resolveHelperServerPort reads active env files before process
   );
 });
 
-test("LocalEdgeKit_resolveHelperServerPort rejects non-canonical default collisions", () => {
+void test("LocalEdgeKit_resolveHelperServerPort rejects non-canonical default collisions", () => {
   assert.throws(
     () =>
       LocalEdgeKit_resolveHelperServerPort({

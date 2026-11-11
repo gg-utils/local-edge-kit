@@ -41,7 +41,8 @@ function createFakeSession(
 ): LocalEdgeKit_InteractiveSession {
   return {
     chooseFromList: async (options) => {
-      const requestedValue = state.chosenScopes.shift();
+      await Promise.resolve();
+           const requestedValue = state.chosenScopes.shift();
       if (requestedValue === undefined) {
         throw new Error("missing fake scope");
       }
@@ -63,16 +64,18 @@ function createFakeSession(
     printSectionBreak: () => state.lines.push("break"),
     printSuccess: (message) => state.lines.push(`success:${message}`),
     printWarning: (message) => state.lines.push(`warning:${message}`),
-    promptReadLine: async () => "",
+    promptReadLine: () => Promise.resolve(""),
     promptRequired: async () => {
-      const value = state.requiredAnswers.shift();
+      await Promise.resolve();
+           const value = state.requiredAnswers.shift();
       if (value === undefined) {
         throw new Error("missing fake required answer");
       }
       return value;
     },
     promptYesNo: async () => {
-      const value = state.yesNoAnswers.shift();
+      await Promise.resolve();
+           const value = state.yesNoAnswers.shift();
       if (value === undefined) {
         throw new Error("missing fake yes/no answer");
       }
@@ -137,7 +140,7 @@ function createConfig(): LocalEdgeKit_InteractiveActionMenuConfig<
   };
 }
 
-test("LocalEdgeKit_printInteractiveActionMenu renders configured sections", () => {
+void test("LocalEdgeKit_printInteractiveActionMenu renders configured sections", () => {
   const state: FakeSessionState = {
     chosenScopes: [],
     lines: [],
@@ -158,7 +161,7 @@ test("LocalEdgeKit_printInteractiveActionMenu renders configured sections", () =
   ]);
 });
 
-test("LocalEdgeKit_handleInteractiveActionMenuSelection dispatches configured actions", async () => {
+void test("LocalEdgeKit_handleInteractiveActionMenuSelection dispatches configured actions", async () => {
   const state: FakeSessionState = {
     chosenScopes: ["all"],
     lines: [],
@@ -181,6 +184,7 @@ test("LocalEdgeKit_handleInteractiveActionMenuSelection dispatches configured ac
       _session: LocalEdgeKit_InteractiveSession,
       request: LocalEdgeKit_InteractiveRunScriptRequest,
     ) => {
+      await Promise.resolve();
       requests.push(request);
     },
   };

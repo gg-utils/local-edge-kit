@@ -97,7 +97,7 @@ export type LocalEdgeKit_DnsAuditOperations = {
 export type LocalEdgeKit_RunDnsAuditCommandOptions = {
   readonly args: readonly string[];
   readonly config: LocalEdgeKit_Config;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly env?: NodeJS.ProcessEnv | undefined;
   readonly operations?: LocalEdgeKit_DnsAuditOperations;
   readonly output?: LocalEdgeKit_DnsAuditOutput;
 };
@@ -403,7 +403,7 @@ async function LocalEdgeKit_readDnsAuditRegistryRealms(
 
   try {
     const rawRegistry = await fs.readFile(registryPath, "utf8");
-    const registry = JSON.parse(rawRegistry);
+    const registry: unknown = JSON.parse(rawRegistry);
     if (!LocalEdgeKit_isRecord(registry)) {
       throw new Error("[local-edge:dns-audit] Registry file must be an object.");
     }

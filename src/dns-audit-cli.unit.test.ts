@@ -131,7 +131,7 @@ async function writeRegistry(options: {
   );
 }
 
-test("LocalEdgeKit_runDnsAuditCommand validates resolver, listener, and realm targets", async () => {
+void test("LocalEdgeKit_runDnsAuditCommand validates resolver, listener, and realm targets", async () => {
   const { generatedDir, projectRoot, resolverDir } = await createTempRoot();
   await fs.writeFile(
     path.join(resolverDir, "local.test"),
@@ -148,16 +148,20 @@ test("LocalEdgeKit_runDnsAuditCommand validates resolver, listener, and realm ta
       return await fs.readFile(filePath, "utf8");
     },
     async isDnsListenerAvailable() {
+ await Promise.resolve();
       return true;
     },
     async isDirectProbeUtilityAvailable() {
+ await Promise.resolve();
       return true;
     },
     async resolveSystemHost(hostname) {
+ await Promise.resolve();
       assert.equal(hostname, "app.main.nginx-docker.tester.local.test");
       return "127.0.0.1";
     },
     async resolveDirectHost(options) {
+ await Promise.resolve();
       assert.equal(options.hostname, "app.main.nginx-docker.tester.local.test");
       return "127.0.0.1";
     },
@@ -211,7 +215,7 @@ test("LocalEdgeKit_runDnsAuditCommand validates resolver, listener, and realm ta
   assert.match(artifact, /method=nginx-docker/);
 });
 
-test("LocalEdgeKit_runDnsAuditCommand returns strict failure for DNS mismatches", async () => {
+void test("LocalEdgeKit_runDnsAuditCommand returns strict failure for DNS mismatches", async () => {
   const { generatedDir, projectRoot, resolverDir } = await createTempRoot();
   await fs.writeFile(
     path.join(resolverDir, "local.test"),
@@ -238,15 +242,19 @@ test("LocalEdgeKit_runDnsAuditCommand returns strict failure for DNS mismatches"
         return await fs.readFile(filePath, "utf8");
       },
       async isDnsListenerAvailable() {
+ await Promise.resolve();
         return true;
       },
       async isDirectProbeUtilityAvailable() {
+ await Promise.resolve();
         return true;
       },
       async resolveSystemHost() {
+ await Promise.resolve();
         return "127.0.0.2";
       },
       async resolveDirectHost() {
+ await Promise.resolve();
         return "127.0.0.2";
       },
     },

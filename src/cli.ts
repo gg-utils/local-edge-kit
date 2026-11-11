@@ -24,7 +24,7 @@ import { LocalEdgeKit_runUrlsCommand } from "./urls-cli.js";
 export type LocalEdgeKit_RunCliOptions = {
   args: readonly string[];
   config: LocalEdgeKit_Config;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
 };
 
 function LocalEdgeKit_usage(config: LocalEdgeKit_Config): string {

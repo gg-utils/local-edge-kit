@@ -52,7 +52,7 @@ export type LocalEdgeKit_InteractiveSession = {
 
 /** Command details emitted by the package-owned menu runner into a consumer runner. */
 export type LocalEdgeKit_InteractiveRunScriptRequest = {
-  readonly args?: readonly string[];
+  readonly args?: readonly string[] | undefined;
   readonly scriptName: string;
 };
 
@@ -70,7 +70,7 @@ export type LocalEdgeKit_InteractiveMenuAction<
       readonly kind: "exit";
     }
   | {
-      readonly args?: readonly string[];
+      readonly args?: readonly string[] | undefined;
       readonly kind: "run-script";
       readonly scriptName: string;
       readonly warning?: string;

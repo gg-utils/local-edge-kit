@@ -483,7 +483,7 @@ export type LocalEdgeKit_IdentityConfig = {
 /** Output and diagnostic labels used by generic command runners. */
 export type LocalEdgeKit_CliConfig = {
   commandName?: string;
-  logPrefix?: string;
+  logPrefix?: string | undefined;
 };
 
 /** Full consumer-authored config consumed by the kit. */

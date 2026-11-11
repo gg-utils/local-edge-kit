@@ -1,0 +1,80 @@
+name: forbidden-names
+
+# Enforces the README rule: no tracked content, path, commit message, branch name, tag or
+# pull request text may name the earlier platform or its UI product.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: ['**']
+    tags: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # A branch or tag deletion has nothing to check, and its old tip may be gone.
+    if: github.event_name != 'push' || !github.event.deleted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tracked contents and paths
+        run: sh scripts/check-forbidden-names.sh tree
+      # Only the ref of this event is checked, so another branch cannot fail this run.
+      - name: Pushed branch or tag name, and tag text
+        if: github.event_name == 'push'
+        env:
+          REF_NAME: ${{ github.ref }}
+        run: sh scripts/check-forbidden-names.sh ref "$REF_NAME"
+      - name: Every commit of this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: sh scripts/check-forbidden-names.sh range "$BASE_SHA" "$HEAD_SHA"
+      - name: Pull request title, body and branch name
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: printf '%s\n%s\n%s\n' "$PR_TITLE" "$PR_BODY" "$PR_BRANCH" | sh scripts/check-forbidden-names.sh text
+      - name: Every pushed commit
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+        # The base is the previous tip when git still has it. A new ref or a force push has
+        # no usable previous tip, so the base falls back to origin/main. main itself has no
+        # fallback: the step fails instead of passing unchecked.
+        run: |
+          if git rev-parse --verify --quiet "${BEFORE_SHA}^{commit}" > /dev/null; then
+            base="$BEFORE_SHA"
+          elif [ "$REF" != "refs/heads/main" ]; then
+            base="origin/main"
+          else
+            echo "forbidden-names: the previous tip of main is unknown; cannot check the push." >&2
+            exit 2
+          fi
+          sh scripts/check-forbidden-names.sh range "$base" "$AFTER_SHA"
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 26]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run type-check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run check:dist

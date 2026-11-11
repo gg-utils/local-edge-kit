@@ -54,11 +54,11 @@ function createTestConfig(): LocalEdgeKit_Config {
   });
 }
 
-test("LocalEdgeKit_runCli renders help without dispatching", async () => {
+void test("LocalEdgeKit_runCli renders help without dispatching", async () => {
   const originalLog = console.log;
   const output: string[] = [];
   console.log = (message?: unknown): void => {
-    output.push(String(message ?? ""));
+    output.push(typeof message === "string" ? message : "");
   };
 
   try {
@@ -77,11 +77,11 @@ test("LocalEdgeKit_runCli renders help without dispatching", async () => {
   }
 });
 
-test("LocalEdgeKit_runCli rejects unknown commands", async () => {
+void test("LocalEdgeKit_runCli rejects unknown commands", async () => {
   const originalError = console.error;
   const output: string[] = [];
   console.error = (message?: unknown): void => {
-    output.push(String(message ?? ""));
+    output.push(typeof message === "string" ? message : "");
   };
 
   try {

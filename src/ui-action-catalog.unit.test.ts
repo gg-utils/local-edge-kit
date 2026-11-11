@@ -52,7 +52,7 @@ const ACTIONS: readonly LocalEdgeKit_UiActionCard<
   },
 ];
 
-test("local-edge UI action catalog helpers resolve ids and categories", () => {
+void test("local-edge UI action catalog helpers resolve ids and categories", () => {
   assert.equal(
     LocalEdgeKit_getUiActionById({ actions: ACTIONS, id: "status" })?.label,
     "Status",

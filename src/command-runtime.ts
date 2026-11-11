@@ -30,20 +30,20 @@ import {
 
 export type LocalEdgeKit_CommandRuntimeOptions = {
   defaultProjectRoot: string;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
   projectRootEnvName?: string;
 };
 
 export type LocalEdgeKit_CommandRuntimeLoadEnvFileStackOptions = {
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   logPrefix: string;
   sourceFiles: readonly string[];
 };
 
 export type LocalEdgeKit_CommandRuntimeScriptOptions = {
-  args?: readonly string[];
-  env?: NodeJS.ProcessEnv;
+  args?: readonly string[] | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
   scriptDirectory: string;
   scriptFileName: string;
 };
@@ -51,7 +51,7 @@ export type LocalEdgeKit_CommandRuntimeScriptOptions = {
 export type LocalEdgeKit_CommandRuntimeCommandOptions = {
   args: readonly string[];
   command: string;
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
 };
 
 /** Resolves the effective project root, respecting a caller value and env override. */
@@ -68,8 +68,8 @@ export function LocalEdgeKit_commandRuntimeResolveProjectRoot(
 /** Returns the default `.env.local-edge` path for a resolved project root. */
 export function LocalEdgeKit_commandRuntimeDefaultEnvFile(options: {
   defaultProjectRoot: string;
-  env?: NodeJS.ProcessEnv;
-  projectRoot?: string | null;
+  env?: NodeJS.ProcessEnv | undefined;
+  projectRoot?: string | null | undefined;
   projectRootEnvName?: string;
 }): string {
   return path.join(
@@ -87,7 +87,7 @@ export function LocalEdgeKit_commandRuntimeIsTruthy(
 
 /** Returns true when the configured strict-start value should cause hard failures. */
 export function LocalEdgeKit_commandRuntimeShouldFailHard(options: {
-  env?: NodeJS.ProcessEnv;
+  env?: NodeJS.ProcessEnv | undefined;
   strictStartEnvName?: string;
 }): boolean {
   const env = options.env ?? process.env;

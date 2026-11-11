@@ -259,7 +259,7 @@ function InkActionBrowserConfiguredForm<Model>({
       {screen.fields.map((field, index) => (
         <Text
           key={field.id}
-          color={index === activeFieldIndex ? "cyan" : undefined}
+          {...(index === activeFieldIndex ? { color: "cyan" as const } : {})}
         >
           {index === activeFieldIndex ? "> " : "  "}
           {field.label}:{" "}
@@ -373,7 +373,6 @@ export function LocalEdgeKitInkActionBrowserApp<
   description,
   formScreens,
   formatSpawnPreview,
-  getActionById,
   projectRoot,
   readMethodAll,
   runSpawnRequest,
@@ -647,7 +646,7 @@ export function LocalEdgeKitInkActionBrowserApp<
         <Box flexDirection="column">
           <Text bold>Categories</Text>
           {categoryRows.map((row) => (
-            <Text key={row.id} color={row.selected ? "cyan" : undefined}>
+            <Text key={row.id} {...(row.selected ? { color: "cyan" as const } : {})}>
               {row.marker}
               {row.label}
             </Text>
@@ -662,7 +661,7 @@ export function LocalEdgeKitInkActionBrowserApp<
         <Box flexDirection="column">
           <Text bold>{category.label}</Text>
           {actionRows.map((row) => (
-            <Text key={row.id} color={row.selected ? "cyan" : undefined}>
+            <Text key={row.id} {...(row.selected ? { color: "cyan" as const } : {})}>
               {row.marker}
               {row.label} <Text color="gray">{row.riskLabel}</Text>
             </Text>
