@@ -14,9 +14,9 @@ import test from "node:test";
 import { LocalEdgeCore_createExposureBackend } from "@gg-utils/local-edge-core/exposure";
 
 import { type LocalEdgeKit_SupervisorConfig, LocalEdgeKit_runSupervisorCli } from "./supervisor-cli.js";
-import { fakeHost } from "./supervisor-fake-host.unit.test.js";
+import { fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 
-const HOST = "node-a.example.ts.net";
+const HOST = "node-a.example.test";
 
 function backendFactory(mapped: Record<string, string>) {
   const calls: string[] = [];
@@ -56,10 +56,10 @@ function capture() {
 void test("status prints a table with process, health and edge state", async () => {
   const stdout = capture();
   const backend = backendFactory({ "8451": "http://127.0.0.1:4300" });
-  const host = fakeHost({ files: { "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  const host = fakeHost({ files: { "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   const code = await LocalEdgeKit_runSupervisorCli({ args: ["status"], config, host, createBackend: backend.create, stdout: stdout.writer });
   assert.equal(code, 0);
-  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.ts\.net:8451\s+exposed/);
+  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.test:8451\s+exposed/);
   assert.match(stdout.text(), /later\s+disabled/);
 });
 
@@ -188,7 +188,7 @@ void test("config backend hostnames plans SNI hosts and expose --apply refuses",
 });
 
 void test("up with hostnames checks a candidate, writes the config and starts nginx; a rerun adopts it", async () => {
-  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   const stdout = capture();
   const stderr = capture();
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up"], config: hostConfig, host, stdout: stdout.writer, stderr: stderr.writer }), 0);
@@ -207,7 +207,7 @@ void test("up with hostnames checks a candidate, writes the config and starts ng
 
 void test("up with a changed config reloads the running nginx and never restarts it", async () => {
   const host = nginxHost({
-    files: { ...certFiles, "/w/auth/p": "10", "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" },
+    files: { ...certFiles, "/w/auth/p": fakePidFile(10), "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" },
     processes: [{ pid: 10, group: 10, port: 4300 }, { pid: 500, group: 500, port: 8460 }],
   });
   const stdout = capture();
@@ -236,7 +236,7 @@ void test("a failing nginx -t leaves the live config alone; no certificate means
 
 void test("status with hostnames shows the adopted router and the Serve TCP port as exposed", async () => {
   const host = nginxHost({
-    files: { "/w/auth/p": "10", "/st/nginx/nginx.pid": "500" },
+    files: { "/w/auth/p": fakePidFile(10), "/st/nginx/nginx.pid": "500" },
     processes: [{ pid: 10, group: 10, port: 4300 }, { pid: 500, group: 500, port: 8460 }, { pid: 31, group: 31, port: 3100 }],
   });
   const stdout = capture();
@@ -281,7 +281,7 @@ void test("an app's own hostname pattern reaches the router config", async () =>
       { id: "dash", enabled: true, external: true, localPort: 3081, healthPath: "/", hostnameTemplate: "{label}.m1.{rootZone}" },
     ],
   };
-  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: dashConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
   assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /server_name dash\.m1\.example\.test;/);
 });

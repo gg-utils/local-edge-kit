@@ -145,6 +145,10 @@
     "./safe-write": {
       "types": "./dist/safe-write.d.ts",
       "default": "./dist/safe-write.js"
+    },
+    "./process-identity": {
+      "types": "./dist/process-identity.d.ts",
+      "default": "./dist/process-identity.js"
     }
   },
   "bin": {

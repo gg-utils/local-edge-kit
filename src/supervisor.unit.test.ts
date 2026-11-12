@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fakeHost } from "./supervisor-fake-host.unit.test.js";
+import { fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 import {
   type LocalEdgeKit_SupervisedApp,
   LocalEdgeKit_inspectSupervisedApp,
@@ -79,7 +79,7 @@ void test("env check returns missing names only and treats empty values as missi
 
 void test("inspect adopts a pid-file process whose group holds the port", () => {
   const host = fakeHost({
-    files: { "/w/auth/.local/edge.pid": "35291\n" },
+    files: { "/w/auth/.local/edge.pid": fakePidFile(35291) },
     processes: [{ pid: 35291, group: 35255 }, { pid: 35345, group: 35255, port: 4300 }],
   });
   const auth = apps()[1];
@@ -89,7 +89,7 @@ void test("inspect adopts a pid-file process whose group holds the port", () => 
 
 void test("inspect adopts a listener in a child process group by ancestry, and down signals both groups", () => {
   const host = fakeHost({
-    files: { "/w/web/.local/edge.pid": "41844" },
+    files: { "/w/web/.local/edge.pid": fakePidFile(41844) },
     processes: [
       { pid: 41844, group: 41844 },
       { pid: 41856, group: 41844, parent: 41844 },
@@ -109,7 +109,7 @@ void test("inspect adopts a listener in a child process group by ancestry, and d
 void test("inspect reports stale pid, stopped, port-busy and starting", () => {
   const auth = apps()[1];
   assert.ok(auth);
-  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth, fakeHost({ files: { "/w/auth/.local/edge.pid": "1234" } })).state, "stale-pid");
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth, fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(1234) } })).state, "stale-pid");
   assert.equal(LocalEdgeKit_inspectSupervisedApp(auth, fakeHost()).state, "stopped");
   assert.equal(
     LocalEdgeKit_inspectSupervisedApp(auth, fakeHost({ processes: [{ pid: 77, group: 77, port: 4300 }] })).state,
@@ -118,19 +118,19 @@ void test("inspect reports stale pid, stopped, port-busy and starting", () => {
   assert.equal(
     LocalEdgeKit_inspectSupervisedApp(
       auth,
-      fakeHost({ files: { "/w/auth/.local/edge.pid": "5" }, processes: [{ pid: 5, group: 5 }, { pid: 77, group: 77, port: 4300 }] }),
+      fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(5) }, processes: [{ pid: 5, group: 5 }, { pid: 77, group: 77, port: 4300 }] }),
     ).state,
     "port-busy",
   );
   assert.equal(
-    LocalEdgeKit_inspectSupervisedApp(auth, fakeHost({ files: { "/w/auth/.local/edge.pid": "5" }, processes: [{ pid: 5, group: 5 }] })).state,
+    LocalEdgeKit_inspectSupervisedApp(auth, fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(5) }, processes: [{ pid: 5, group: 5 }] })).state,
     "starting",
   );
 });
 
 void test("up adopts a running dependency and starts the dependant, waiting for health", async () => {
   const host = fakeHost({
-    files: { "/w/auth/.local/edge.pid": "35291", "/w/web/.local/edge.log": "old\n" },
+    files: { "/w/auth/.local/edge.pid": fakePidFile(35291), "/w/web/.local/edge.log": "old\n" },
     processes: [{ pid: 35291, group: 35255, port: 4300 }],
     onSpawn: (h, pid) => {
       const proc = h.processes.get(pid);
@@ -141,7 +141,7 @@ void test("up adopts a running dependency and starts the dependant, waiting for 
   assert.deepEqual(results.map((r) => [r.appId, r.action]), [["auth", "adopted"], ["web", "started"]]);
   assert.equal(host.spawned.length, 1);
   assert.deepEqual(host.spawned[0]?.args, ["dev"]);
-  assert.equal(host.files.get("/w/web/.local/edge.pid"), "9001\n");
+  assert.equal(host.files.get("/w/web/.local/edge.pid"), fakePidFile(9001));
   assert.equal(host.signals.length, 0);
 });
 
@@ -201,7 +201,7 @@ void test("up reports a process that exits before it is ready", async () => {
 
 void test("down signals the process group, dependants first, and removes the pid file", () => {
   const host = fakeHost({
-    files: { "/w/auth/.local/edge.pid": "35291", "/w/web/.local/edge.pid": "34489" },
+    files: { "/w/auth/.local/edge.pid": fakePidFile(35291), "/w/web/.local/edge.pid": fakePidFile(34489) },
     processes: [
       { pid: 35291, group: 35255 },
       { pid: 35345, group: 35255, port: 4300 },
@@ -221,7 +221,7 @@ void test("down never signals a foreign port holder and signals only the pid whe
   assert.equal(foreign.signals.length, 0);
   const sameGroup = fakeHost({
     ownGroup: 500,
-    files: { "/w/auth/.local/edge.pid": "501" },
+    files: { "/w/auth/.local/edge.pid": fakePidFile(501) },
     processes: [{ pid: 501, group: 500, port: 4300 }],
   });
   LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: sameGroup, out });
@@ -229,7 +229,7 @@ void test("down never signals a foreign port holder and signals only the pid whe
 });
 
 void test("down escalates to SIGKILL when TERM is ignored", () => {
-  const host = fakeHost({ files: { "/w/auth/.local/edge.pid": "600" }, processes: [{ pid: 600, group: 600, port: 4300 }] });
+  const host = fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(600) }, processes: [{ pid: 600, group: 600, port: 4300 }] });
   const realKill = (pid: number, signal: NodeJS.Signals | 0) => host.kill(pid, signal);
   const patched = { ...host };
   patched.kill = (pid, signal) => {
@@ -286,4 +286,112 @@ void test("external apps are listed and probed but never started, stopped or sig
   assert.equal(host.spawned.length, 0);
   assert.equal(host.signals.length, 0);
   assert.match(LocalEdgeKit_validateSupervisedApps([{ ...app, command: "x" }])[0] ?? "", /route only/);
+});
+
+void test("a recycled pid holding the port is never adopted or signalled", async () => {
+  const seed = () =>
+    fakeHost({
+      files: { "/w/auth/.local/edge.pid": fakePidFile(77) },
+      processes: [{ pid: 77, group: 77, port: 4300, start: "a later start" }],
+    });
+  const auth = apps().filter((a) => a.id === "auth");
+  const inspected = LocalEdgeKit_inspectSupervisedApp(auth[0] ?? apps()[1]!, seed());
+  assert.equal(inspected.state, "port-busy");
+  assert.match(inspected.note, /stale/);
+  const down = seed();
+  assert.equal(LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: down, out })[0]?.ok, false);
+  assert.deepEqual(down.signals, []);
+  const up = seed();
+  const started = await LocalEdgeKit_supervisorUp({ apps: auth.map((a) => ({ ...a, requiredEnvNames: [] })), requestedIds: ["auth"], host: up, out });
+  assert.equal(started[0]?.action, "failed");
+  assert.deepEqual(up.signals, []);
+  assert.equal(up.spawned.length, 0);
+});
+
+void test("a recycled pid without a listener is stale, not starting, and down only removes the pid file", () => {
+  const host = fakeHost({
+    files: { "/w/auth/.local/edge.pid": fakePidFile(78) },
+    processes: [{ pid: 78, group: 78, command: "some other program" }],
+  });
+  const auth = apps().filter((a) => a.id === "auth");
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth[0]!, host).state, "stale-pid");
+  const results = LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host, out });
+  assert.equal(results[0]?.action, "already-stopped");
+  assert.deepEqual(host.signals, []);
+  assert.equal(host.files.has("/w/auth/.local/edge.pid"), false);
+});
+
+void test("a pid file without a recorded identity is unverified: never adopted, started over or signalled", async () => {
+  const seed = () =>
+    fakeHost({ files: { "/w/auth/.local/edge.pid": "35291\n" }, processes: [{ pid: 35291, group: 35291, port: 4300 }] });
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, requiredEnvNames: [] }));
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth[0]!, seed()).state, "unverified");
+  const up = seed();
+  const started = await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host: up, out });
+  assert.equal(started[0]?.action, "failed");
+  assert.equal(up.spawned.length, 0);
+  const down = seed();
+  assert.equal(LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: down, out })[0]?.ok, false);
+  assert.deepEqual(down.signals, []);
+  assert.equal(down.files.has("/w/auth/.local/edge.pid"), true);
+});
+
+void test("identity is checked again before every signal: a pid recycled during the stop gets no SIGKILL", () => {
+  const host = fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(600) }, processes: [{ pid: 600, group: 600, port: 4300 }] });
+  const patched = { ...host };
+  patched.kill = (pid, signal) => {
+    if (signal === "SIGTERM") {
+      host.signals.push({ pid, signal });
+      const proc = host.processes.get(600);
+      if (proc) proc.start = "recycled after exit";
+      return;
+    }
+    host.kill(pid, signal);
+  };
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, stopTimeoutMs: 1000 }));
+  LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: patched, out });
+  assert.deepEqual(host.signals.map((s) => s.signal), ["SIGTERM"]);
+});
+
+void test("a live supervisor's lock makes up and down refuse; a dead owner's lock is taken over and released", async () => {
+  const lockFile = "/w/auth/.local/edge.pid.lock";
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, requiredEnvNames: [] }));
+  const held = fakeHost({
+    files: { [lockFile]: fakePidFile(4242) },
+    processes: [{ pid: 4242, group: 4242 }],
+    onSpawn: (h, pid) => {
+      const proc = h.processes.get(pid);
+      if (proc) proc.port = 4300;
+    },
+  });
+  const refused = await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host: held, out });
+  assert.equal(refused[0]?.action, "failed");
+  assert.match(refused[0]?.message ?? "", /another supervisor \(pid 4242\)/);
+  assert.equal(held.spawned.length, 0);
+  assert.equal(LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: held, out })[0]?.ok, false);
+
+  const proc = held.processes.get(4242);
+  if (proc) proc.alive = false;
+  const started = await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host: held, out });
+  assert.equal(started[0]?.action, "started");
+  assert.equal(held.spawned.length, 1);
+  assert.equal(held.files.has(lockFile), false);
+});
+
+void test("a start records the identity with the pid and refreshes a title the process changed while starting", async () => {
+  const host = fakeHost({
+    onSpawn: (h, pid) => {
+      const proc = h.processes.get(pid);
+      if (proc) proc.port = 4300;
+    },
+    healthy: () => {
+      const proc = host.processes.get(9001);
+      if (proc) proc.command = "renamed-by-itself";
+      return 200;
+    },
+  });
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, requiredEnvNames: [] }));
+  await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host, out });
+  assert.equal(host.files.get("/w/auth/.local/edge.pid"), fakePidFile(9001, { command: "renamed-by-itself" }));
+  assert.equal(LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host, out })[0]?.action, "stopped");
 });
