@@ -6,9 +6,12 @@
  * source reads a JSON file through `LocalEdgeKit_readFileSafe` from safe-write.ts, the same
  * containment as the careful writers: inside a given root, no symlinked folder below the root, no
  * symlinked file, opened with `O_NOFOLLOW` and rechecked while the descriptor is held. A missing
- * file means no extra apps. The file must be owned by you and writable by you alone (0600) in a
- * folder that is owned by you and not writable by group or others (0700), and at most 256 KiB;
- * otherwise it is refused, because it chooses which loopback ports are published. Parse errors give
+ * file means no extra apps. The file must be owned by you and not writable by group or others, in
+ * a folder that is owned by you and not writable by group or others, and at most 256 KiB;
+ * otherwise it is refused, because it chooses which loopback ports are published (who can change
+ * it matters, not who can read it, so read access by group or others is not refused; 0600 in a
+ * 0700 folder is the recommended setup). Only the folder holding the file is checked; folders
+ * between the root and it, and everything above the root, are trusted. Parse errors give
  * a fixed message and the position, never file content, and unknown keys are refused. Every extra
  * app is route only (`external`): the supervisor lists, probes and routes it, and never starts,
  * stops or signals its process.
@@ -77,10 +80,49 @@ export type LocalEdgeKit_ExtraAppsFileSourceOptions = {
     name?: string | undefined;
 };
 /**
+ * Finds the first character offset (UTF-16 units, from 0) at which `text` stops being strict
+ * JSON, with a small tokenizer of our own, so the answer does not depend on how any engine words
+ * its `JSON.parse` message. It uses an explicit stack, so deeply nested input cannot overflow the
+ * call stack. An unexpected end of input is reported at `text.length`.
+ *
+ * @param text - The text to scan.
+ * @returns The offset of the first offending character, or `null` when the text is valid JSON.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_jsonFirstErrorOffset('{"a": 1,}'); // 8
+ * LocalEdgeKit_jsonFirstErrorOffset('{"a": 1}'); // null
+ * ```
+ */
+export declare function LocalEdgeKit_jsonFirstErrorOffset(text: string): number | null;
+/**
+ * Describes where a `JSON.parse` failure is, without any file content: `line L, column C`
+ * (both from 1; a line break is `\n`; the column counts UTF-16 units) when a position can be
+ * found, otherwise `position not reported`.
+ *
+ * The line and column are always computed here from a character offset. The offset is the one the
+ * engine's message gives (`... at position N`, a form Node 22 to 26 all use when they report a
+ * position) when it lies inside the text; otherwise it comes from our own strict scan, so a
+ * multi-line file or a change in the engine's wording still gets a position. The engine's
+ * message is only read for that number and is never repeated.
+ *
+ * @param text - The text that failed to parse.
+ * @param error - What `JSON.parse` threw.
+ * @returns Text that is safe to put in a message.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_jsonErrorPosition('{\n  "a": 1,\n}', new Error("anything")); // "line 3, column 1"
+ * ```
+ */
+export declare function LocalEdgeKit_jsonErrorPosition(text: string, error: unknown): string;
+/**
  * Parses and checks extra-apps JSON. Throws one error listing every problem, prefixed with the
  * source name. Host labels and proxy values are checked again by the router against its config.
  * Unknown keys are refused at every level (a typo such as `upstreamhost` must not be dropped
- * silently); a key is named only when it is a short plain token. A JSON syntax error gives a fixed
+ * silently); a key is named only when it is a short plain token. An id must be 1 to 63 lowercase
+ * letters, digits and dashes and a host must have the shape of a host name; a value that does
+ * not is refused without being repeated, so file text never reaches a later message. A JSON syntax error gives a fixed
  * message and the position, never any of the file's text.
  *
  * @param text - The JSON text, for example the file's content.
@@ -134,8 +176,8 @@ export declare function LocalEdgeKit_createExtraAppsFileSource(options: LocalEdg
 export declare function LocalEdgeKit_extraAppToSupervisedApp(app: LocalEdgeKit_ExtraApp, source: string): LocalEdgeKit_SupervisedApp;
 /**
  * Merges project apps with every source's apps. Project apps keep their `source` or get
- * `project`. Ids compare case-insensitively and hosts after lowercasing and dropping a trailing
- * dot.
+ * `project`. Ids compare after lowercasing and dropping a trailing dot (so `ROUTER.` is `router`)
+ * and hosts the same way.
  *
  * @param options - Project apps, the sources to load, and (to check hosts) the hostname settings.
  * @returns The project apps followed by each source's apps, in source order.

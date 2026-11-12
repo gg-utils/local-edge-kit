@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1"
   }
 }
 ```
@@ -169,10 +169,14 @@ part of the project config. `extraApps` takes a list of sources; each has a `nam
 `LocalEdgeKit_createExtraAppsFileSource({ filePath, root? })` reads a JSON file with the careful
 rules: it must stay inside `root` after `realpath`, must not be a symlink, and is opened with
 `O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in cannot block it). A missing file means no
-extra apps. The file chooses which loopback ports are published, so it is checked like a secret:
-**keep it `0600` in a `0700` folder, both owned by you.** A file that is owned by someone else or
-writable by group or others (for example `0666`, `0620`, `0602`), or one in a folder that is owned
-by someone else or writable by group or others (a sticky bit does not excuse it), is refused with
+extra apps. The file chooses which loopback ports are published, so what matters is who can change
+it, not who can read it. Exactly these are checked: the file must be owned by you and not writable
+by group or others (`0600`, `0640`, `0644` and `0400` all pass; `0666`, `0620` and `0602` do not),
+and the folder that holds it must be owned by you and not writable by group or others (`0700` and
+`0755` pass; a sticky bit does not excuse a writable folder). **Keeping it `0600` in a `0700` folder
+is the recommended setup, but the kit does not require it: read access by group or others is not
+refused.** Only the folder that holds the file is checked (that is `root` itself when the file sits
+directly in it); folders between `root` and that folder and everything above `root` are trusted. A refused file or folder gives
 `local-edge-kit-safe-read-unsafe-mode` or `-unsafe-owner`; the error names the path and the rule,
 never the content. A file over 256 KiB, or one that is not a regular file, is refused too. The file holds
 `{ "apps": [{ "id", "host", "upstream": "127.0.0.1:<port>", "upstreamHost"?, "buffering"?,
@@ -193,7 +197,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -235,7 +239,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:

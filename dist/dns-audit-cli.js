@@ -35,6 +35,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { LocalEdgeCore_buildHostnameFromParts, LocalEdgeCore_createDnsAuditState, LocalEdgeCore_formatDnsAuditPassLine, LocalEdgeCore_formatDnsAuditSummaryLine, LocalEdgeCore_formatDnsAuditWarningLine, LocalEdgeCore_parseDnsAuditCliArgs, LocalEdgeCore_parseMacosResolverContent, LocalEdgeCore_recordDnsAuditFailure, LocalEdgeCore_recordDnsAuditPass, LocalEdgeCore_renderDnsAuditArtifact, LocalEdgeCore_resolveMacosResolverPath, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_loadActiveEnvFileStack } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_getRuntimeMethod, LocalEdgeKit_resolveRuntimeConfig, } from "./runtime-config.js";
 function LocalEdgeKit_defaultDnsAuditOutput() {
     return {
@@ -211,7 +212,7 @@ function LocalEdgeKit_expectedIpForMethod(options) {
 }
 function LocalEdgeKit_readRegistryRealmRecord(options) {
     if (!LocalEdgeKit_isRecord(options.value)) {
-        throw new Error(`[local-edge:dns-audit] Registry realm '${options.realmSlug}' must be an object.`);
+        throw new Error(`[local-edge:dns-audit] Registry realm '${LocalEdgeKit_messageWord(options.realmSlug)}' must be an object.`);
     }
     const realmSlug = LocalEdgeKit_stringFromRecord({
         record: options.value,
@@ -219,7 +220,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options) {
         fallback: options.realmSlug,
     });
     if (realmSlug !== options.realmSlug) {
-        throw new Error(`[local-edge:dns-audit] Registry realm key '${options.realmSlug}' does not match realmSlug '${realmSlug}'.`);
+        throw new Error(`[local-edge:dns-audit] Registry realm key '${LocalEdgeKit_messageWord(options.realmSlug)}' does not match its realmSlug field.`);
     }
     return {
         realmSlug,

@@ -13,7 +13,20 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -201,4 +214,87 @@ void test("the size cap holds while reading: a file that grows after fstat is re
   } finally {
     b.done();
   }
+});
+
+void test("a folder swapped in before the open is the read-changed error, worded for a read with one prefix", () => {
+  const b = box();
+  try {
+    assert.throws(
+      () =>
+        LocalEdgeKit_readFileSafe(b.file, {
+          root: b.dir,
+          hooks: {
+            beforeOpen: () => {
+              // The walked folder is replaced by a new one holding a file of the same name.
+              renameSync(b.dir, `${b.dir}.old`);
+              mkdirSync(b.dir, { mode: 0o700 });
+              chmodSync(b.dir, 0o700);
+              writeFileSync(b.file, MARKER, { mode: 0o600 });
+            },
+          },
+        }),
+      (error: Error) => {
+        assert.equal(error.message, `local-edge-kit-safe-read-changed: folder ${b.dir} changed during the read`);
+        assert.equal((error as Error & { code?: string }).code, "local-edge-kit-safe-read-changed");
+        assert.ok(!error.message.includes("safe-write"), "no write prefix on a read");
+        assert.ok(!error.message.includes("during the write"), "a read is not a write");
+        return true;
+      },
+    );
+  } finally {
+    rmSync(`${b.dir}.old`, { recursive: true, force: true });
+    b.done();
+  }
+});
+
+void test("a symlink swapped in just before the open is the named symlink error, not a raw ELOOP", () => {
+  const b = box();
+  try {
+    const other = path.join(path.dirname(b.dir), "other.json");
+    writeFileSync(other, MARKER, { mode: 0o600 });
+    assert.throws(
+      () =>
+        LocalEdgeKit_readFileSafe(b.file, {
+          root: b.dir,
+          hooks: {
+            beforeOpen: () => {
+              unlinkSync(b.file);
+              symlinkSync(other, b.file);
+            },
+          },
+        }),
+      (error: Error) => {
+        assert.equal((error as Error & { code?: string }).code, "local-edge-kit-safe-read-symlink");
+        assert.ok(!error.message.includes("ELOOP"), error.message);
+        assert.ok(error.message.includes(b.file), "names the path");
+        assert.ok(!error.message.includes(MARKER), "never the content");
+        return true;
+      },
+    );
+  } finally {
+    b.done();
+  }
+});
+
+void test("a file where a folder is expected is the named not-a-folder error", () => {
+  const b = box();
+  try {
+    // A folder on the way is a file.
+    refused(() => LocalEdgeKit_readFileSafe(path.join(b.file, "inner.json"), { root: b.dir }), "not-a-folder", b.file);
+    // The root itself is a file.
+    refused(() => LocalEdgeKit_readFileSafe(path.join(b.file, "inner.json"), { root: b.file }), "not-a-folder", b.file);
+  } finally {
+    b.done();
+  }
+});
+
+void test("the readFileSafe @throws lists every code the read can give, including not-a-folder and the symlink swap", () => {
+  const source = readFileSync(path.join(REPO_ROOT, "src", "safe-write.ts"), "utf8");
+  const start = source.lastIndexOf("/**", source.indexOf("export function LocalEdgeKit_readFileSafe"));
+  const doc = source.slice(start, source.indexOf("export function LocalEdgeKit_readFileSafe"));
+  const throwsBlock = doc.slice(doc.indexOf("@throws"), doc.indexOf("@example"));
+  for (const code of ["outside-root", "symlink", "not-file", "not-a-folder", "changed", "unsafe-mode", "unsafe-owner", "too-large"]) {
+    assert.ok(throwsBlock.includes(`\`${code}\``), `@throws should list ${code}`);
+  }
+  assert.ok(/swapped in/.test(throwsBlock), "@throws should say the symlink code also covers a swap just before the open");
 });

@@ -420,3 +420,31 @@ void test("a pid reused in the same second by the same user and command line is 
   delete proc.launchId;
   assert.equal(LocalEdgeKit_inspectSupervisedApp(auth[0] as LocalEdgeKit_SupervisedApp, host).state, "running");
 });
+
+void test("config values: app ids and dependency names from the project config are shown as given", () => {
+  // These messages repeat ids from the project's own config, which may be shown. File-sourced ids
+  // cannot carry anything else: the extra-apps parser only lets 1 to 63 lowercase letters, digits
+  // and dashes through (see extra-apps.unit.test.ts).
+  const base = { enabled: true, external: true, healthPath: "/" };
+  assert.deepEqual(
+    LocalEdgeKit_validateSupervisedApps([
+      { ...base, id: "my-app", localPort: 3001 },
+      { ...base, id: "my-app", localPort: 3002 },
+      { ...base, id: "needs", localPort: 3003, dependsOn: ["ghost-1"] },
+    ]),
+    ['app id "my-app" is listed twice', 'needs: depends on unknown app "ghost-1"'],
+  );
+  assert.deepEqual(
+    LocalEdgeKit_validateSupervisedApps([
+      { ...base, id: "off", localPort: 3001, enabled: false },
+      { ...base, id: "needs", localPort: 3002, dependsOn: ["off"] },
+    ]),
+    ['needs: depends on disabled app "off"'],
+  );
+  const set = [
+    { ...base, id: "a", localPort: 1, dependsOn: ["b"] },
+    { ...base, id: "b", localPort: 2, dependsOn: ["a"] },
+  ];
+  assert.throws(() => LocalEdgeKit_orderSupervisedApps(set, ["ghost-2"]), /^Error: unknown app "ghost-2"$/);
+  assert.throws(() => LocalEdgeKit_orderSupervisedApps(set, ["a"]), /^Error: dependency cycle: a -> b -> a$/);
+});

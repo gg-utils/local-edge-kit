@@ -82,3 +82,19 @@ void test("LocalEdgeKit_formatUiLaunchHelpText includes examples", () => {
   assert.match(helpText, /--json-plan/u);
   assert.match(helpText, /print-command status/u);
 });
+
+void test("no echo: an unknown action id or option is repeated only when it is a short plain word", () => {
+  const message = (argv: string[]): string => {
+    try {
+      LocalEdgeKit_parseUiLaunchArgv({ argv, cwd: "/cwd", errorPrefix: "[local-edge:test]", isActionId: isDemoActionId });
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return assert.fail("expected a throw");
+  };
+  assert.equal(message(["--json-plan", "missing"]), "[local-edge:test] Unknown action id: missing");
+  assert.equal(message(["--json-plan", "ECHOMARK7 token=x"]), "[local-edge:test] Unknown action id: <17 characters>");
+  assert.equal(message(["--bogus"]), "[local-edge:test] Unknown option: --bogus");
+  assert.equal(message(["--ECHOMARK7=token x"]), "[local-edge:test] Unknown option: --<17 characters>");
+  assert.equal(message(["-x"]), "[local-edge:test] Unknown option: -x");
+});

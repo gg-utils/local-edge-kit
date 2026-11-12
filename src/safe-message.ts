@@ -13,6 +13,11 @@ const LOCAL_EDGE_KIT_MESSAGE_ENV_NAME_SHAPE = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** Most env variable names `LocalEdgeKit_messageEnvNames` repeats. */
 const LOCAL_EDGE_KIT_MESSAGE_NAMES_MAX_COUNT = 5;
 
+/** `<N characters>`, or `<1 character>` for a single one, the same wording core 0.4.1 uses. */
+function LocalEdgeKit_lengthPlaceholder(length: number): string {
+  return length === 1 ? "<1 character>" : `<${String(length)} characters>`;
+}
+
 /**
  * Names a command-line word, such as a `--method` value, in a message: the word itself when it is
  * short and plain, otherwise `<N characters>`.
@@ -32,7 +37,26 @@ const LOCAL_EDGE_KIT_MESSAGE_NAMES_MAX_COUNT = 5;
  * ```
  */
 export function LocalEdgeKit_messageWord(value: string): string {
-  return LOCAL_EDGE_KIT_MESSAGE_WORD_SHAPE.test(value) ? value : `<${String(value.length)} characters>`;
+  return LOCAL_EDGE_KIT_MESSAGE_WORD_SHAPE.test(value) ? value : LocalEdgeKit_lengthPlaceholder(value.length);
+}
+
+/**
+ * Names a command-line option such as `--help` in a message: up to two leading dashes are kept
+ * and the rest goes through `LocalEdgeKit_messageWord`, so `--hlep` is still named while
+ * `--x=<anything with spaces>` is not.
+ *
+ * @param value - The option as given.
+ * @returns Text that is safe to put in a message.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_messageFlag("--hlep"); // "--hlep"
+ * LocalEdgeKit_messageFlag("--a b"); // "--<3 characters>"
+ * ```
+ */
+export function LocalEdgeKit_messageFlag(value: string): string {
+  const dashes = /^-{1,2}/.exec(value)?.[0] ?? "";
+  return `${dashes}${LocalEdgeKit_messageWord(value.slice(dashes.length))}`;
 }
 
 /**
@@ -45,14 +69,14 @@ export function LocalEdgeKit_messageWord(value: string): string {
  *
  * @example
  * ```typescript
- * LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]); // "A_KEY, B_KEY"
+ * LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]); // "A_KEY,B_KEY"
  * LocalEdgeKit_messageEnvNames(["bad name"]); // "<8 characters>"
  * ```
  */
 export function LocalEdgeKit_messageEnvNames(names: readonly string[]): string {
   const shown = names
     .slice(0, LOCAL_EDGE_KIT_MESSAGE_NAMES_MAX_COUNT)
-    .map((name) => (LOCAL_EDGE_KIT_MESSAGE_ENV_NAME_SHAPE.test(name) ? name : `<${String(name.length)} characters>`));
+    .map((name) => (LOCAL_EDGE_KIT_MESSAGE_ENV_NAME_SHAPE.test(name) ? name : LocalEdgeKit_lengthPlaceholder(name.length)));
   const rest = names.length - shown.length;
-  return rest > 0 ? `${shown.join(", ")} (and ${String(rest)} more)` : shown.join(", ");
+  return rest > 0 ? `${shown.join(",")} (and ${String(rest)} more)` : shown.join(",");
 }

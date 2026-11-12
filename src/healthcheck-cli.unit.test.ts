@@ -259,3 +259,32 @@ void test("LocalEdgeKit_runHealthcheckCommand reads registry realms and writes p
   assert.deepEqual((realmArtifact as { realmSlug: unknown }).realmSlug, "alpha");
   assert.equal((realmArtifact as { probes: { upstreamPort: number }[] }).probes[0]?.upstreamPort, 4100);
 });
+
+void test("no echo: registry file content (realm keys and realmSlug fields) is bounded or left out of healthcheck errors", async () => {
+  const run = async (realms: Record<string, unknown>): Promise<string> => {
+    const { generatedDir, projectRoot } = await createTempRoot();
+    await fs.mkdir(path.join(generatedDir, "registry"), { recursive: true });
+    await fs.writeFile(path.join(generatedDir, "registry", "realms.json"), JSON.stringify({ realms }), "utf8");
+    const errors: string[] = [];
+    const exitCode = await LocalEdgeKit_runHealthcheckCommand({
+      args: ["--no-strict"],
+      config: createTestConfig(),
+      env: {
+        LOCAL_EDGE_DEVELOPER_SLUG: "tester",
+        LOCAL_EDGE_ENV_FILE: path.join(projectRoot, ".env.local-edge"),
+        LOCAL_EDGE_ENV_SLUG: "main",
+        LOCAL_EDGE_GENERATED_DIR: generatedDir,
+        LOCAL_EDGE_PROJECT_ROOT: projectRoot,
+        USER: "tester",
+      },
+      output: { log: () => undefined, warn: () => undefined, error: (message) => errors.push(message) },
+      probeSurface: () => Promise.reject(new Error("no probe expected")),
+    });
+    assert.notEqual(exitCode, 0);
+    return errors.join("\n");
+  };
+  assert.equal(await run({ main: 5 }), "[local-edge:healthcheck] Registry realm 'main' must be an object.");
+  assert.equal(await run({ "ECHOMARK7 token": 5 }), "[local-edge:healthcheck] Registry realm '<15 characters>' must be an object.");
+  const mismatch = await run({ main: { realmSlug: "ECHOMARK7 other" } });
+  assert.equal(mismatch, "[local-edge:healthcheck] Registry realm key 'main' does not match its realmSlug field.");
+});

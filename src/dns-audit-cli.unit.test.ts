@@ -267,3 +267,40 @@ void test("LocalEdgeKit_runDnsAuditCommand returns strict failure for DNS mismat
 
   assert.equal(exitCode, 1);
 });
+
+void test("no echo: registry file content (realm keys and realmSlug fields) is bounded or left out of dns-audit errors", async () => {
+  const run = async (realms: Record<string, unknown>): Promise<string> => {
+    const { generatedDir, projectRoot, resolverDir } = await createTempRoot();
+    await fs.writeFile(path.join(resolverDir, "local.test"), "nameserver 127.0.0.1\nport 53535\n", "utf8");
+    await fs.writeFile(path.join(generatedDir, "registry", "realms.json"), JSON.stringify({ realms }), "utf8");
+    const errors: string[] = [];
+    const exitCode = await LocalEdgeKit_runDnsAuditCommand({
+      args: [],
+      config: createTestConfig({ resolverDir }),
+      env: {
+        LOCAL_EDGE_DEVELOPER_SLUG: "tester",
+        LOCAL_EDGE_ENV_FILE: path.join(projectRoot, ".env.local-edge"),
+        LOCAL_EDGE_ENV_SLUG: "main",
+        LOCAL_EDGE_GENERATED_DIR: generatedDir,
+        LOCAL_EDGE_PROJECT_ROOT: projectRoot,
+        LOCAL_EDGE_ROOT_ZONE: "local.test",
+        LOCAL_EDGE_SPLIT_DNS_NGINX_DOCKER_IP: "127.0.0.1",
+        USER: "tester",
+      },
+      operations: {
+        readTextFile: (filePath) => fs.readFile(filePath, "utf8"),
+        isDnsListenerAvailable: () => Promise.resolve(true),
+        isDirectProbeUtilityAvailable: () => Promise.resolve(true),
+        resolveSystemHost: () => Promise.resolve("127.0.0.1"),
+        resolveDirectHost: () => Promise.resolve("127.0.0.1"),
+      },
+      output: { log: () => undefined, warn: () => undefined, error: (message) => errors.push(message) },
+    });
+    assert.notEqual(exitCode, 0);
+    return errors.join("\n");
+  };
+  assert.equal(await run({ main: 5 }), "[local-edge:dns-audit] Registry realm 'main' must be an object.");
+  assert.equal(await run({ "ECHOMARK7 token": 5 }), "[local-edge:dns-audit] Registry realm '<15 characters>' must be an object.");
+  const mismatch = await run({ main: { realmSlug: "ECHOMARK7 other" } });
+  assert.equal(mismatch, "[local-edge:dns-audit] Registry realm key 'main' does not match its realmSlug field.");
+});

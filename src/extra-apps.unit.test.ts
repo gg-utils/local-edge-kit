@@ -10,16 +10,19 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import type { LocalEdgeCore_ExposureHostnamesConfig } from "@gg-utils/local-edge-core/exposure";
 
 import {
   type LocalEdgeKit_ExtraAppsSource,
   LocalEdgeKit_createExtraAppsFileSource,
+  LocalEdgeKit_jsonErrorPosition,
+  LocalEdgeKit_jsonFirstErrorOffset,
   LocalEdgeKit_mergeExtraApps,
   LocalEdgeKit_parseExtraAppsJson,
   LOCAL_EDGE_KIT_RESERVED_APP_IDS,
@@ -180,10 +183,73 @@ void test("parse: a syntax error gives a fixed message and the position, never f
         !error.message.includes("TOPSECRET"),
     );
   }
+});
+
+void test("parse: the position is computed here, so a multi-line file gets line and column on every engine", () => {
+  // Offsets are hand-counted: the first character that is not allowed is on line 3, column 5.
+  const text = `{\n  "apps": [\n    ${MARKER}\n  ]\n}`;
   assert.throws(
-    () => LocalEdgeKit_parseExtraAppsJson(`{\n  "apps" ${MARKER}`, "src.json"),
-    /not valid JSON \(line 2, column \d+\)/,
+    () => LocalEdgeKit_parseExtraAppsJson(text, "src.json"),
+    (error: Error) =>
+      error.message === "local-edge-kit-extra-apps-invalid: src.json: not valid JSON (line 3, column 5)" && !error.message.includes(MARKER),
   );
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson('{\r\n  "apps": [],\r\n}', "src.json"),
+    /not valid JSON \(line 3, column 1\)$/,
+  );
+});
+
+void test("json position: the first offending offset comes from our own scan, whatever the engine says", () => {
+  const cases: [string, number | null][] = [
+    ["", 0],
+    ["{", 1],
+    ['{"a": 1,}', 8],
+    ['{"a" 1}', 5],
+    ['{"a":}', 5],
+    ["[1,]", 3],
+    ["[1 2]", 3],
+    ["tru", 3],
+    ["trux", 3],
+    ["nul1", 3],
+    ['{"a": 01}', 7],
+    ["1.", 2],
+    ["-", 1],
+    ['"abc', 4],
+    ['"a\nb"', 2],
+    ['"\\x"', 2],
+    ['"\\u12G4"', 5],
+    ['{"a":1} x', 8],
+    ["[1]]", 3],
+    ["\ufeff{}", 0],
+    ["{}", null],
+    ["  [1, -2.5e+3, 0, \"a\\u00e9\\n\", true, false, null, {\"k\": []}]\n", null],
+  ];
+  for (const [text, expected] of cases) {
+    assert.equal(LocalEdgeKit_jsonFirstErrorOffset(text), expected, JSON.stringify(text));
+    let valid = true;
+    try {
+      JSON.parse(text);
+    } catch {
+      valid = false;
+    }
+    assert.equal(expected === null, valid, `scan and JSON.parse agree on validity: ${JSON.stringify(text)}`);
+  }
+  // Deep nesting is scanned without recursion: no stack overflow, and the end of input is the failure.
+  assert.equal(LocalEdgeKit_jsonFirstErrorOffset("[".repeat(200_000)), 200_000);
+});
+
+void test("json position: engine offset when it is inside the text, our scan otherwise, never the engine's words", () => {
+  const text = '{\n  "a" 1\n}';
+  // The engine gave offset 3 (the second character of line 2): used as it is, and its words are not repeated.
+  const fromEngine = LocalEdgeKit_jsonErrorPosition(text, new Error(`${MARKER} at position 3`));
+  assert.equal(fromEngine, "line 2, column 2");
+  // No offset in the message, or one past the end: our scan finds the `1` where a colon belongs
+  // (offset 8, the seventh character of line 2).
+  assert.equal(LocalEdgeKit_jsonErrorPosition(text, new Error(`${MARKER} with no position`)), "line 2, column 7");
+  assert.equal(LocalEdgeKit_jsonErrorPosition(text, new Error("at position 9999")), "line 2, column 7");
+  assert.equal(LocalEdgeKit_jsonErrorPosition(text, "not an error object"), "line 2, column 7");
+  // Text the scan finds valid: nothing to report.
+  assert.equal(LocalEdgeKit_jsonErrorPosition("{}", new Error("weird")), "position not reported");
 });
 
 void test("parse: unknown keys are refused at the top level, the app level and the location level", () => {
@@ -253,4 +319,100 @@ void test("merge: the id router is reserved for the supervisor and refused with 
     /^Error: local-edge-kit-extra-apps-reserved-id: machine: app id router is reserved/,
   );
   assert.deepEqual(LOCAL_EDGE_KIT_RESERVED_APP_IDS, ["router"]);
+});
+
+void test("merge: the reserved id is checked after normalising case and trailing dots (ROUTER., Router.., router)", () => {
+  for (const id of ["router", "Router", "ROUTER", "ROUTER.", "router..", "Router.."]) {
+    const source: LocalEdgeKit_ExtraAppsSource = {
+      name: "custom",
+      load: () => [{ id, host: "r.m1.example.test", upstream: "127.0.0.1:9" }],
+    };
+    assert.throws(
+      () => LocalEdgeKit_mergeExtraApps({ apps: [], sources: [source], hostnames }),
+      (error: Error) => error.message.startsWith("local-edge-kit-extra-apps-reserved-id: custom: app id ") && error.message.includes("is reserved"),
+      id,
+    );
+  }
+  // Near misses stay allowed, and a trailing dot also collides with its plain twin as a duplicate id.
+  const ok: LocalEdgeKit_ExtraAppsSource = { name: "custom", load: () => [{ id: "routers", host: "r.m1.example.test", upstream: "127.0.0.1:9" }] };
+  assert.equal(LocalEdgeKit_mergeExtraApps({ apps: [], sources: [ok], hostnames }).length, 1);
+  const twins: LocalEdgeKit_ExtraAppsSource = {
+    name: "custom",
+    load: () => [
+      { id: "play", host: "a.m1.example.test", upstream: "127.0.0.1:9" },
+      { id: "PLAY.", host: "b.m1.example.test", upstream: "127.0.0.1:9" },
+    ],
+  };
+  assert.throws(() => LocalEdgeKit_mergeExtraApps({ apps: [], sources: [twins], hostnames }), /local-edge-kit-extra-apps-conflict: duplicate app id PLAY\./);
+});
+
+void test("merge: a reserved id from a custom source is named only when it is short and plain", () => {
+  const source = (id: string): LocalEdgeKit_ExtraAppsSource => ({
+    name: "custom",
+    load: () => [{ id, host: "r.m1.example.test", upstream: "127.0.0.1:9" }],
+  });
+  assert.throws(() => LocalEdgeKit_mergeExtraApps({ apps: [], sources: [source("ROUTER...")], hostnames }), /app id ROUTER\.\.\. is reserved/);
+  const long = `router${".".repeat(60)}`;
+  assert.throws(
+    () => LocalEdgeKit_mergeExtraApps({ apps: [], sources: [source(long)], hostnames }),
+    (error: Error) => error.message.includes("app id <66 characters> is reserved") && !error.message.includes(long),
+  );
+});
+
+void test("README: the extra-apps section says exactly what the code checks (write access and owner, not read access)", () => {
+  const readme = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "README.md"), "utf8");
+  assert.ok(!/checked like a secret/.test(readme), "the README must not say the file is checked like a secret");
+  assert.ok(readme.includes("not writable by group or others"), "the README should state the write rule");
+  assert.ok(readme.includes("`0640`, `0644` and `0400` all pass"), "the README should say read-only group/other modes pass");
+  assert.ok(readme.includes("everything above `root` are trusted"), "the README should say what is not checked");
+  assert.ok(!/#v0\.5\.0/.test(readme), "install examples point at the current tag");
+});
+
+void test("parse: ids are 1 to 63 lowercase letters, digits and dashes and hosts have the shape of a host name, never echoed", () => {
+  const app = (id: string, host: string): string => JSON.stringify({ apps: [{ id, host, upstream: "127.0.0.1:9" }] });
+  const refusal = (json: string): string => {
+    try {
+      LocalEdgeKit_parseExtraAppsJson(json, "src.json");
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return assert.fail("expected a throw");
+  };
+  assert.equal(LocalEdgeKit_parseExtraAppsJson(app("a".repeat(63), "a.b-c.example.test"), "src.json")[0]?.id.length, 63);
+  assert.equal(LocalEdgeKit_parseExtraAppsJson(app("play", "Play.Example.test."), "src.json").length, 1);
+  assert.match(refusal(app("a".repeat(64), "p.example.test")), /apps\[0\]: id must be 1 to 63 lowercase letters, digits and dashes/);
+  for (const host of [`${MARKER} x.example.test`, `a.example.test/${MARKER}`, `${MARKER}\n.example.test`, "a..example.test", "-a.example.test", "a".repeat(64) + ".example.test", `${"a.".repeat(130)}test`]) {
+    const message = refusal(app("play", host));
+    assert.match(message, /^local-edge-kit-extra-apps-invalid: src\.json: play: host must be a host name of letters, digits, dots and dashes/, host);
+    assert.ok(!message.includes(MARKER), message);
+  }
+  // The long id is not echoed either: the problem is numbered by its place in the file.
+  assert.ok(!refusal(app("a".repeat(64), "p.example.test")).includes("a".repeat(64)));
+});
+
+void test("merge: ids and hosts in conflict messages go through the word helper, so a custom source cannot push long or odd text into them", () => {
+  const custom = (name: string, id: string, host: string): LocalEdgeKit_ExtraAppsSource => ({
+    name,
+    load: () => [{ id, host, upstream: "127.0.0.1:9" }],
+  });
+  const odd = `${MARKER} id with spaces`;
+  assert.throws(
+    () =>
+      LocalEdgeKit_mergeExtraApps({
+        apps: [],
+        sources: [custom("a", odd, "a.example.test"), custom("b", odd, "b.example.test")],
+        hostnames,
+      }),
+    (error: Error) => /duplicate app id <\d+ characters>: a and b/.test(error.message) && !error.message.includes(MARKER),
+  );
+  const longHost = `${"h".repeat(60)}.example.test`;
+  assert.throws(
+    () =>
+      LocalEdgeKit_mergeExtraApps({
+        apps: [],
+        sources: [custom("a", "one", longHost), custom("b", "two", longHost)],
+        hostnames,
+      }),
+    (error: Error) => /duplicate hostname <\d+ characters>: one \(a\) and two \(b\)/.test(error.message) && !error.message.includes("h".repeat(60)),
+  );
 });

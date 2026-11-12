@@ -13,6 +13,8 @@
  * @documentation reviewed=2026-05-23 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
+
 /** Spawn request union produced by local-edge action-browser UIs. */
 export type LocalEdgeKit_UiSpawnRequest =
   | {
@@ -132,7 +134,7 @@ export function LocalEdgeKit_buildUiSpawnRequest<
 }): LocalEdgeKit_UiSpawnRequest {
   const action = options.config.getActionById(options.actionId);
   if (!action) {
-    throw new Error(`Unknown local-edge UI action: ${options.actionId}`);
+    throw new Error(`Unknown local-edge UI action: ${LocalEdgeKit_messageWord(options.actionId)}`);
   }
 
   const descriptor = options.config.actionDescriptors[options.actionId];

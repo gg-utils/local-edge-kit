@@ -55,6 +55,7 @@ import type {
   LocalEdgeKit_SurfaceConfig,
 } from "./config.js";
 import { LocalEdgeKit_loadActiveEnvFileStack } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import {
   LocalEdgeKit_getRuntimeMethod,
   LocalEdgeKit_resolveRuntimeConfig,
@@ -348,7 +349,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options: {
 }): LocalEdgeKit_DnsAuditRealmRecord {
   if (!LocalEdgeKit_isRecord(options.value)) {
     throw new Error(
-      `[local-edge:dns-audit] Registry realm '${options.realmSlug}' must be an object.`,
+      `[local-edge:dns-audit] Registry realm '${LocalEdgeKit_messageWord(options.realmSlug)}' must be an object.`,
     );
   }
 
@@ -359,7 +360,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options: {
   });
   if (realmSlug !== options.realmSlug) {
     throw new Error(
-      `[local-edge:dns-audit] Registry realm key '${options.realmSlug}' does not match realmSlug '${realmSlug}'.`,
+      `[local-edge:dns-audit] Registry realm key '${LocalEdgeKit_messageWord(options.realmSlug)}' does not match its realmSlug field.`,
     );
   }
 

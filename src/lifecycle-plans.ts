@@ -870,7 +870,7 @@ export function LocalEdgeKit_resolveSetupRequest(options: {
       return {
         ok: false,
         exitCode: 1,
-        stderrLine: `[local-edge:setup] Requested method '${method}' is not enabled by ${methodsEnvName}='${runtimeConfig.configuredMethods.join(",")}'.\n`,
+        stderrLine: `[local-edge:setup] Requested method '${LocalEdgeKit_messageWord(method)}' is not enabled by ${methodsEnvName}.\n`,
       };
     }
 
@@ -1044,7 +1044,7 @@ export function LocalEdgeKit_resolveEnsureRunningRequest(options: {
       return {
         ok: false,
         exitCode: 1,
-        stderrLine: `[local-edge:ensure-running] ERROR: Method '${method}' is not enabled by ${methodsEnvName}='${env[methodsEnvName] ?? options.config.router.primaryMethod}'.\n`,
+        stderrLine: `[local-edge:ensure-running] ERROR: Method '${LocalEdgeKit_messageWord(method)}' is not enabled by ${methodsEnvName}.\n`,
       };
     }
 

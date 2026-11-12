@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.5.1 - 2026-11-12
+
+Follow-ups to 0.5.0 from review: the apps-file read reports its errors accurately, the README says exactly what is checked, and the messages that repeated a command-line word, an env value or file text are now bounded. The core pin stays `v0.4.1`.
+
+- **`LocalEdgeKit_readFileSafe` errors.** A folder or file that changed during a read now gives
+  `local-edge-kit-safe-read-changed: folder <path> changed during the read` (one prefix, worded for
+  a read; 0.5.0 doubled the prefix and said "during the write"). A symlink swapped in between the
+  check and the open is the named `local-edge-kit-safe-read-symlink`, not a raw `ELOOP`. `@throws`
+  now lists `not-a-folder` and the symlink swap.
+- **README matches the code.** The extra-apps file is not "checked like a secret": it is refused
+  when someone else owns it or group or others can write it, and the same for the folder that holds
+  it. `0640`, `0644` and `0400` are read; folders between `root` and the holding folder and
+  everything above `root` are trusted. `0600` in a `0700` folder stays the recommended setup.
+- **Reserved id.** `LocalEdgeKit_mergeExtraApps` compares ids after lowercasing and dropping a
+  trailing dot, so `ROUTER.` from a custom source is refused as reserved, and `play` and `PLAY.`
+  are duplicates.
+- **Parse-error position.** `not valid JSON (line L, column C)` is computed by the kit from the
+  character offset the engine gives, or from the kit's own strict scan when it gives none, so
+  multi-line files get a position on every Node version. It never includes file text.
+  `LocalEdgeKit_jsonErrorPosition` and `LocalEdgeKit_jsonFirstErrorOffset` are exported from
+  `@gg-utils/local-edge-kit/extra-apps` and the package root.
+- **Ids and hosts from the file are shape-checked.** An id is 1 to 63 lowercase letters, digits and
+  dashes (it was unbounded) and a host must look like a host name; a value that does not is refused
+  without being repeated. Ids and hosts in duplicate messages go through the word helper.
+- **More messages no longer repeat what they were given.** The requested method in
+  `setup` and `ensure-running` is bounded, and those two messages name `LOCAL_EDGE_METHODS` (or the
+  configured variable) and the rule, never its value. The primary-method errors name the variables
+  only. A command-line word is repeated only when it is short and plain in: unknown action id and
+  option (`ui-launcher`), unknown app and command (`supervisor`), invalid menu choice, unknown
+  command (`cli`), the first startup word, the unknown UI action. Registry realm keys are bounded and
+  the registry `realmSlug` field is not printed.
+- **Wording matches core 0.4.1:** `<1 character>` in the singular and env names joined with `,`.
+  Message texts changed accordingly. Core's helpers are not exported yet; when a core release
+  exports them the kit can import them instead of its own copy.
+- **No behaviour change otherwise.** Which files are read or refused is unchanged.
+
 ## 0.5.0 - 2026-11-12
 
 Adds per-machine extra apps: route-only apps that are not part of the project config, read from pluggable sources. The file source is strict: a too-open apps file is refused.

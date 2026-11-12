@@ -23,6 +23,21 @@
  */
 export declare function LocalEdgeKit_messageWord(value: string): string;
 /**
+ * Names a command-line option such as `--help` in a message: up to two leading dashes are kept
+ * and the rest goes through `LocalEdgeKit_messageWord`, so `--hlep` is still named while
+ * `--x=<anything with spaces>` is not.
+ *
+ * @param value - The option as given.
+ * @returns Text that is safe to put in a message.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_messageFlag("--hlep"); // "--hlep"
+ * LocalEdgeKit_messageFlag("--a b"); // "--<3 characters>"
+ * ```
+ */
+export declare function LocalEdgeKit_messageFlag(value: string): string;
+/**
  * Names a list of environment variable names in a message, comma separated: at most five, each
  * repeated only when it has the env variable name shape (otherwise `<N characters>`), then a count
  * of the rest. Names only; this never receives a value.
@@ -32,7 +47,7 @@ export declare function LocalEdgeKit_messageWord(value: string): string;
  *
  * @example
  * ```typescript
- * LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]); // "A_KEY, B_KEY"
+ * LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]); // "A_KEY,B_KEY"
  * LocalEdgeKit_messageEnvNames(["bad name"]); // "<8 characters>"
  * ```
  */
