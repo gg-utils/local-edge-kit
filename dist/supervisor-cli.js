@@ -14,6 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import { LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND, LOCAL_EDGE_CORE_HOSTNAMES_BACKEND, LocalEdgeCore_createExposureBackend, LocalEdgeCore_observeHostnamesServeTcp, LocalEdgeCore_resolveExposureBackendName, LocalEdgeCore_renderExposurePlanText, } from "@gg-utils/local-edge-core/exposure";
+import { LocalEdgeKit_mergeExtraApps } from "./extra-apps.js";
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
 import { LOCAL_EDGE_KIT_ROUTER_ID, LocalEdgeKit_inspectRouter, LocalEdgeKit_routerDown, LocalEdgeKit_routerUp, } from "./supervisor-router.js";
 import { LocalEdgeKit_createSupervisorHost, LocalEdgeKit_inspectSupervisedApp, LocalEdgeKit_probeSupervisedAppHealth, LocalEdgeKit_resolveAppPath, LocalEdgeKit_supervisorDown, LocalEdgeKit_supervisorUp, LocalEdgeKit_validateSupervisedApps, } from "./supervisor.js";
@@ -40,6 +41,30 @@ function LocalEdgeKit_parseSupervisorArgs(args) {
     return { positionals, flags };
 }
 /**
+ * Merges the config's extra-app sources into its apps; a config without sources is returned as is.
+ *
+ * @param config - Supervisor config, possibly with `extraApps` sources.
+ * @returns The config with source apps appended to `apps`.
+ * @throws When a source is unreadable or an app clashes with an existing id or host.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_resolveSupervisorConfig(config).apps.map((app) => app.id);
+ * ```
+ */
+export function LocalEdgeKit_resolveSupervisorConfig(config) {
+    if (config.extraApps === undefined || config.extraApps.length === 0) {
+        return config;
+    }
+    return {
+        ...config,
+        apps: LocalEdgeKit_mergeExtraApps({
+            apps: config.apps,
+            sources: config.extraApps,
+            hostnames: config.exposure.hostnames,
+        }),
+    };
+}
+/**
  * Builds the backend-neutral exposure manifest from supervisor apps.
  *
  * @param config - Supervisor config.
@@ -63,6 +88,8 @@ export function LocalEdgeKit_buildExposureManifest(config) {
             edgeName: app.edgeName,
             locations: app.locations,
             hostnameTemplate: app.hostnameTemplate,
+            host: app.host,
+            proxy: app.proxy,
         })),
     };
 }
@@ -126,21 +153,28 @@ function LocalEdgeKit_selectIds(config, positionals) {
 export async function LocalEdgeKit_runSupervisorCli(options) {
     const stdout = options.stdout ?? process.stdout;
     const stderr = options.stderr ?? process.stderr;
-    const { config } = options;
     const host = options.host ?? LocalEdgeKit_createSupervisorHost();
     const createBackend = options.createBackend ?? ((name) => LocalEdgeCore_createExposureBackend(name));
     const [command, ...rest] = options.args;
     const parsed = LocalEdgeKit_parseSupervisorArgs(rest);
     const json = parsed.flags.has("json");
     const backendFlag = parsed.flags.get("backend");
-    const backendName = typeof backendFlag === "string" ? backendFlag : (config.exposure.backend ?? LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND);
-    const usesRouter = config.exposure.router !== undefined &&
+    const backendName = typeof backendFlag === "string" ? backendFlag : (options.config.exposure.backend ?? LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND);
+    const usesRouter = options.config.exposure.router !== undefined &&
         LocalEdgeCore_resolveExposureBackendName(backendName) === LOCAL_EDGE_CORE_HOSTNAMES_BACKEND;
     const routerRequested = parsed.positionals.length === 0 || parsed.positionals.includes(LOCAL_EDGE_KIT_ROUTER_ID);
     const appPositionals = parsed.positionals.filter((id) => !usesRouter || id !== LOCAL_EDGE_KIT_ROUTER_ID);
     if (!command || command === "help" || command === "--help" || command === "-h") {
-        stdout.write(LocalEdgeKit_supervisorUsage(config));
+        stdout.write(LocalEdgeKit_supervisorUsage(options.config));
         return command ? 0 : 2;
+    }
+    let config;
+    try {
+        config = LocalEdgeKit_resolveSupervisorConfig(options.config);
+    }
+    catch (error) {
+        stderr.write(`config invalid:\n  - ${error instanceof Error ? error.message : String(error)}\n`);
+        return 2;
     }
     const problems = LocalEdgeKit_validateSupervisedApps(config.apps);
     if (problems.length > 0) {
@@ -179,13 +213,14 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                             healthy: row.health?.healthy ?? null,
                             health: row.health?.checks ?? [],
                             note: row.inspection.note,
+                            source: row.app.source ?? "project",
                             edge: row.edge,
                         })),
                     }, null, 2)}\n`);
                 }
                 else {
                     stdout.write(`exposure backend: ${backend.name}\n`);
-                    stdout.write(LocalEdgeKit_renderTable(["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "NOTE"], rows.map((row) => [
+                    stdout.write(LocalEdgeKit_renderTable(["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "SOURCE", "NOTE"], rows.map((row) => [
                         row.app.id,
                         row.inspection.state,
                         row.inspection.pid === null ? "-" : String(row.inspection.pid),
@@ -193,6 +228,7 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                         row.health === null ? "-" : row.health.healthy ? "ok" : "fail",
                         row.edge?.edgeUrl ?? "-",
                         row.edge?.state ?? "-",
+                        row.app.source ?? "project",
                         row.inspection.note,
                     ]).concat(router === null
                         ? []
@@ -205,6 +241,7 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                                 "-",
                                 `serve :${String(router.edgePort)}`,
                                 router.serve.state,
+                                "-",
                                 `${router.inspection.note}; ${router.serve.note}`,
                             ],
                         ])));

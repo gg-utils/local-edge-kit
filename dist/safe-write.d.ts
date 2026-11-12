@@ -22,6 +22,8 @@
  * (the umask can only remove bits). An existing file keeps its mode.
  * Flow: lexical check -> segment walk (lstat, mkdir one level, record dev/ino) -> open
  * O_NOFOLLOW -> recheck chain + fd identity -> write + fsync -> recheck chain -> rename -> dir fsync.
+ * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, the same
+ * `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are read.
  *
  * @example
  * ```typescript
@@ -54,6 +56,25 @@ export type LocalEdgeKit_SafeWriteOptions = {
     /** Test seams. */
     hooks?: LocalEdgeKit_SafeWriteHooks | undefined;
 };
+/**
+ * Reads a UTF-8 file inside `root` with the writers' containment rules: lexical containment, a
+ * segment walk that refuses symlinked folders, no symlinked target, an `O_NOFOLLOW` open, and a
+ * recheck of the folder chain and the descriptor's identity before reading.
+ *
+ * @param filePath - File to read; must be inside `options.root`.
+ * @param options - Root the file must stay inside. The root itself may be a symlink.
+ * @returns The file's text, or `null` when the file or a folder on the way does not exist.
+ * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root, is a
+ * symlink or not a regular file, a folder on the way is a symlink, or a folder or the file
+ * changed while it was opened.
+ * @example
+ * ```typescript
+ * const text = LocalEdgeKit_readFileSafe("/home/me/.config/edge/apps.json", { root: "/home/me/.config/edge" });
+ * ```
+ */
+export declare function LocalEdgeKit_readFileSafe(filePath: string, options: {
+    root: string;
+}): string | null;
 /**
  * Creates a folder (and missing folders above it, up to `root`) without following symlinks.
  *

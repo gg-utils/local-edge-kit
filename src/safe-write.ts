@@ -22,6 +22,8 @@
  * (the umask can only remove bits). An existing file keeps its mode.
  * Flow: lexical check -> segment walk (lstat, mkdir one level, record dev/ino) -> open
  * O_NOFOLLOW -> recheck chain + fd identity -> write + fsync -> recheck chain -> rename -> dir fsync.
+ * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, the same
+ * `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are read.
  *
  * @example
  * ```typescript
@@ -46,6 +48,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -174,6 +177,98 @@ function LocalEdgeKit_checkTarget(filePath: string, options: LocalEdgeKit_SafeWr
     throw LocalEdgeKit_safeWriteError("not-a-file", `${resolved} is not a regular file`);
   }
   return { target: resolved, chain };
+}
+
+function LocalEdgeKit_safeReadError(code: string, message: string): Error {
+  return Object.assign(new Error(`local-edge-kit-safe-read-${code}: ${message}`), { code: `local-edge-kit-safe-read-${code}` });
+}
+
+/**
+ * Walks from the real root down to `relativeDir` without creating anything. Returns null when a
+ * folder is missing; refuses symlinked folders and non-folders like the write walk does.
+ */
+function LocalEdgeKit_walkDirsForRead(realRoot: string, relativeDir: string): LocalEdgeKit_CheckedDir[] | null {
+  const rootStats = lstatSync(realRoot);
+  if (!rootStats.isDirectory()) {
+    throw LocalEdgeKit_safeReadError("not-a-folder", `${realRoot} is not a folder`);
+  }
+  const chain: LocalEdgeKit_CheckedDir[] = [{ dir: realRoot, dev: rootStats.dev, ino: rootStats.ino }];
+  let current = realRoot;
+  for (const segment of relativeDir.split(path.sep).filter((part) => part !== "" && part !== ".")) {
+    current = path.join(current, segment);
+    const stats = LocalEdgeKit_lstatOrNull(current);
+    if (stats === null) {
+      return null;
+    }
+    if (stats.isSymbolicLink()) {
+      throw LocalEdgeKit_safeReadError("symlink", `refusing to read below symlinked folder ${current}`);
+    }
+    if (!stats.isDirectory()) {
+      throw LocalEdgeKit_safeReadError("not-a-folder", `${current} is not a folder`);
+    }
+    chain.push({ dir: current, dev: stats.dev, ino: stats.ino });
+  }
+  return chain;
+}
+
+/**
+ * Reads a UTF-8 file inside `root` with the writers' containment rules: lexical containment, a
+ * segment walk that refuses symlinked folders, no symlinked target, an `O_NOFOLLOW` open, and a
+ * recheck of the folder chain and the descriptor's identity before reading.
+ *
+ * @param filePath - File to read; must be inside `options.root`.
+ * @param options - Root the file must stay inside. The root itself may be a symlink.
+ * @returns The file's text, or `null` when the file or a folder on the way does not exist.
+ * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root, is a
+ * symlink or not a regular file, a folder on the way is a symlink, or a folder or the file
+ * changed while it was opened.
+ * @example
+ * ```typescript
+ * const text = LocalEdgeKit_readFileSafe("/home/me/.config/edge/apps.json", { root: "/home/me/.config/edge" });
+ * ```
+ */
+export function LocalEdgeKit_readFileSafe(filePath: string, options: { root: string }): string | null {
+  const root = path.resolve(options.root);
+  const target = path.resolve(filePath);
+  if (!LocalEdgeKit_isWithin(root, target) || target === root) {
+    throw LocalEdgeKit_safeReadError("outside-root", `${target} is not inside ${root}`);
+  }
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+  const chain = LocalEdgeKit_walkDirsForRead(realRoot, path.relative(root, path.dirname(target)));
+  if (chain === null) {
+    return null;
+  }
+  const resolved = path.join(chain[chain.length - 1]?.dir ?? realRoot, path.basename(target));
+  const existing = LocalEdgeKit_lstatOrNull(resolved);
+  if (existing === null) {
+    return null;
+  }
+  if (existing.isSymbolicLink()) {
+    throw LocalEdgeKit_safeReadError("symlink", `refusing to read through symlink ${resolved}`);
+  }
+  if (!existing.isFile()) {
+    throw LocalEdgeKit_safeReadError("not-file", `${resolved} is not a regular file`);
+  }
+  const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    try {
+      LocalEdgeKit_recheckChain(chain);
+      LocalEdgeKit_assertFdIsPath(fd, resolved);
+    } catch (error) {
+      throw LocalEdgeKit_safeReadError("changed", (error as Error).message);
+    }
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

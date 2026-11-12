@@ -3,7 +3,7 @@
  * CLI with a fake host: candidate check, write and start, adopt only a verified nginx, SIGHUP
  * reload and SIGQUIT stop with an identity check, activation confirmed by the marker hash (a
  * received but rejected SIGHUP restores the old bytes), exact `-c` matching of a hand-started
- * master, and reloading a config that was written but never activated.
+ * master, reloading a config that was written but never activated, and merging extra-app sources.
  *
  * @testing Node test runner (tsx): npm run test -- src/supervisor-router.unit.test.ts
  *
@@ -345,6 +345,49 @@ void test("an app's own hostname pattern reaches the router config", async () =>
   const host = nginxHost({ files: { ...certFiles, "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: dashConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
   assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /server_name dash\.m1\.example\.test;/);
+});
+
+void test("extra-app sources merge into the router config and status shows each source", async () => {
+  const machineConfig: LocalEdgeKit_SupervisorConfig = {
+    ...hostConfig,
+    exposure: { ...hostConfig.exposure, hostnames: { ...hostnames, extraWildcardTemplates: ["*.m1.{rootZone}"] } },
+    extraApps: [
+      {
+        name: "machine.json",
+        load: () => [
+          {
+            id: "play",
+            host: "play.m1.example.test",
+            upstream: "127.0.0.1:5174",
+            upstreamHost: "127.0.0.1:5174",
+            buffering: false,
+            readTimeout: "3600s",
+            locations: [{ path: "/events", upstream: "127.0.0.1:33114", buffering: false, readTimeout: "3600s" }],
+          },
+        ],
+      },
+    ],
+  };
+  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: machineConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
+  const conf = host.files.get("/st/nginx/nginx.conf") ?? "";
+  assert.match(conf, /server_name play\.m1\.example\.test;\n {4}location \/ \{\n {6}proxy_pass http:\/\/127\.0\.0\.1:5174;\n {6}proxy_http_version 1\.1;\n {6}proxy_set_header Host 127\.0\.0\.1:5174;/);
+  assert.match(conf, /location \/events \{\n {6}proxy_pass http:\/\/127\.0\.0\.1:33114;[^}]*proxy_buffering off;\n {6}proxy_read_timeout 3600s;/);
+  assert.match(conf, /server_name preview\.proj-m1\.example\.test;/);
+
+  const status = capture();
+  await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: machineConfig, host, stdout: status.writer, stderr: capture().writer });
+  assert.match(status.text(), /EDGE-STATE\s+SOURCE\s+NOTE/);
+  assert.match(status.text(), /play\s+external\s.*\smachine\.json\s+route only/);
+  assert.match(status.text(), /preview\s+external\s.*\sproject\s+route only/);
+
+  const clash: LocalEdgeKit_SupervisorConfig = {
+    ...machineConfig,
+    extraApps: [{ name: "machine.json", load: () => [{ id: "dupe", host: "preview.proj-m1.example.test", upstream: "127.0.0.1:9" }] }],
+  };
+  const err = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: clash, host, stdout: capture().writer, stderr: err.writer }), 2);
+  assert.match(err.text(), /duplicate hostname preview\.proj-m1\.example\.test: preview \(project\) and dupe \(machine\.json\)/);
 });
 
 const routerState = (host: ReturnType<typeof nginxHost>) =>
