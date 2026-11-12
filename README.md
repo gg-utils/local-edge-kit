@@ -110,8 +110,12 @@ never started, stopped or signalled. `locations` adds extra path routes for the 
 | `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
 | `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
 
-An app is adopted when its pid file names a live process and that process's group holds the
-port. Processes started by someone else are therefore never started twice. A port held by any
+When `up` starts an app it writes the pid file with the process's identity: owner uid, start
+time and command line. An app is adopted only when its pid file names a live process whose
+identity still matches and whose process tree holds the port, so a run started by an earlier
+`up` is never started twice and a recycled pid is never adopted. A pid file without an identity
+(written by another tool) is shown as `unverified`; such a process is never adopted or
+signalled. `down` checks the identity again immediately before every signal. A port held by any
 other process is reported as `port-busy`, and the supervisor never signals that process. The env
 check reads names only and never returns or prints values. Pid files are written atomically
 (temp file, fsync, rename) inside the app's `cwd`, and log files are opened without following
@@ -119,11 +123,24 @@ symlinks.
 
 With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
 the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
-before it replaces the real one, then a running nginx (adopted by its pid file) gets
-`-s reload`; nginx is started only when none runs, and never without the certificate and key.
-`down` sends `-s quit`. `status` adds a `router` row with the nginx pid and the Serve raw-TCP
-mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself is never
-changed by the supervisor.
+before it replaces the real one. A running nginx is then sent SIGHUP, or nginx is started when
+none runs (never without the certificate and key). If that reload or start fails, the previous
+config bytes are put back. The router counts as ours only when the pid in nginx's pid file matches
+the identity recorded in `<stateRoot>/router.state.json`, or is an `nginx: master process` of our
+user naming this config; any other process there is `unverified` and is never signalled or
+replaced. The state file also records which config the router last accepted, so a config that
+was written but never activated is reloaded on the next `up`. `down` sends SIGQUIT, checking the
+identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
+is never changed by the supervisor.
+
+`up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
+publish the pid file, so two supervisors cannot start the same app twice. A lock left by a
+process that is gone is taken over. Pid, lock and log files must sit inside the app's `cwd`.
+They are written without following symlinks: folders are walked one level at a time and checked
+again after the open and before the rename, pid files are replaced atomically, and new files are
+`0600` and new folders `0700`. The `cwd` and its ancestors are trusted; folders below it must
+not be writable by other users (see `safe-write.ts` for the remaining window).
 
 Per-machine extra apps (`@gg-utils/local-edge-kit/extra-apps`) add route-only apps that are not
 part of the project config. `extraApps` takes a list of sources; each has a `name` and a `load()`.

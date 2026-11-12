@@ -3,8 +3,9 @@
  * project manifest, read from pluggable sources and merged with it.
  *
  * A source is anything with a name and a `load()` that returns extra apps. The built-in file
- * source reads a JSON file with the same rules as the careful writers: the file must sit inside a
- * given root after `realpath`, must not be a symlink, and is opened with `O_NOFOLLOW`. A missing
+ * source reads a JSON file through `LocalEdgeKit_readFileSafe` from safe-write.ts, the same
+ * containment as the careful writers: inside a given root, no symlinked folder below the root, no
+ * symlinked file, opened with `O_NOFOLLOW` and rechecked while the descriptor is held. A missing
  * file means no extra apps. Every extra app is route only (`external`): the supervisor lists,
  * probes and routes it, and never starts, stops or signals its process.
  * Flow: sources -> load + validate -> supervised apps with `source` -> merge (ids and hosts unique).
@@ -17,70 +18,15 @@
  * @testing Node test runner (tsx): npm run test -- src/extra-apps.unit.test.ts
  *
  * @see src/supervisor-cli.ts - Merges the sources before every command.
- * @see src/safe-write.ts - The same containment and symlink rules for writes.
+ * @see src/safe-write.ts - `LocalEdgeKit_readFileSafe`, the contained read this source uses.
  * @documentation reviewed=2026-11-12 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { LocalEdgeCore_exposureAppHost } from "@gg-utils/local-edge-core/exposure";
+import { LocalEdgeKit_readFileSafe } from "./safe-write.js";
 /** Source name of apps declared in the project config. */
 export const LOCAL_EDGE_KIT_PROJECT_APPS_SOURCE = "project";
 const LOCAL_EDGE_KIT_LOOPBACK = "127.0.0.1";
-/** True when `child` equals `parent` or sits under it. */
-function LocalEdgeKit_isWithin(parent, child) {
-    const relative = path.relative(parent, child);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-/**
- * Reads a text file inside `root`: lexical and `realpath` containment, no symlinked target, opened
- * with `O_NOFOLLOW`. Returns null when the file does not exist. Throws otherwise.
- */
-export function LocalEdgeKit_readFileSafe(filePath, options) {
-    const root = path.resolve(options.root);
-    const target = path.resolve(filePath);
-    if (!LocalEdgeKit_isWithin(root, target) || target === root) {
-        throw new Error(`local-edge-kit-safe-read-outside-root: ${target} is not inside ${root}`);
-    }
-    let realRoot;
-    let realDir;
-    try {
-        realRoot = realpathSync(root);
-        realDir = realpathSync(path.dirname(target));
-    }
-    catch (error) {
-        if (error.code === "ENOENT") {
-            return null;
-        }
-        throw error;
-    }
-    if (!LocalEdgeKit_isWithin(realRoot, realDir)) {
-        throw new Error(`local-edge-kit-safe-read-outside-root: ${path.dirname(target)} resolves to ${realDir}, outside ${realRoot}`);
-    }
-    const resolved = path.join(realDir, path.basename(target));
-    let stats;
-    try {
-        stats = lstatSync(resolved);
-    }
-    catch (error) {
-        if (error.code === "ENOENT") {
-            return null;
-        }
-        throw error;
-    }
-    if (stats.isSymbolicLink()) {
-        throw new Error(`local-edge-kit-safe-read-symlink: refusing to read through symlink ${resolved}`);
-    }
-    const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-        if (!fstatSync(fd).isFile()) {
-            throw new Error(`local-edge-kit-safe-read-not-file: ${resolved} is not a regular file`);
-        }
-        return readFileSync(fd, "utf8");
-    }
-    finally {
-        closeSync(fd);
-    }
-}
 /** Parses `127.0.0.1:<port>` into the port; null when it is anything else. */
 function LocalEdgeKit_loopbackPort(value) {
     if (typeof value !== "string") {

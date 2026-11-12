@@ -22,8 +22,8 @@ import {
   LocalEdgeKit_createExtraAppsFileSource,
   LocalEdgeKit_mergeExtraApps,
   LocalEdgeKit_parseExtraAppsJson,
-  LocalEdgeKit_readFileSafe,
 } from "./extra-apps.js";
+import { LocalEdgeKit_readFileSafe } from "./safe-write.js";
 
 function scratch(): string {
   return mkdtempSync(path.join(os.tmpdir(), "kit-extra-apps-"));
@@ -80,9 +80,12 @@ void test("file source: missing file is empty, real file loads, symlinks and out
   symlinkSync(elsewhere, path.join(root, "sub", "out"));
   assert.throws(
     () => LocalEdgeKit_readFileSafe(path.join(root, "sub", "out", "apps.json"), { root }),
-    /local-edge-kit-safe-read-outside-root/,
+    /local-edge-kit-safe-read-symlink: refusing to read below symlinked folder/,
   );
   assert.throws(() => LocalEdgeKit_readFileSafe(path.join(elsewhere, "apps.json"), { root }), /outside-root/);
+  mkdirSync(path.join(root, "dir.json"));
+  assert.throws(() => LocalEdgeKit_readFileSafe(path.join(root, "dir.json"), { root }), /local-edge-kit-safe-read-not-file/);
+  assert.equal(LocalEdgeKit_readFileSafe(path.join(root, "missing", "deeper", "apps.json"), { root }), null);
 });
 
 void test("parse: shape problems are listed together with the source name", () => {

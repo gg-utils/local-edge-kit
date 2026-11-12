@@ -6,22 +6,46 @@
  * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 
+import { type LocalEdgeKit_ProcessIdentity, LocalEdgeKit_formatPidFile } from "./process-identity.js";
 import type { LocalEdgeKit_SupervisorHost } from "./supervisor.js";
 
-/** Fake host plus the recorded effects tests assert on. */
+/** A fake process. `uid`, `start` and `command` default to values derived from the pid. */
+export type FakeProcess = {
+  pid: number;
+  group: number;
+  port?: number;
+  parent?: number;
+  uid?: number;
+  start?: string;
+  command?: string;
+};
+
+/** Identity the fake host reports for a process seeded with defaults. */
+export function fakeIdentity(pid: number, overrides: Partial<LocalEdgeKit_ProcessIdentity> = {}): LocalEdgeKit_ProcessIdentity {
+  return { uid: 501, startedAt: `start-${String(pid)}`, command: `cmd-${String(pid)}`, ...overrides };
+}
+
+/** Pid file text as the supervisor writes it for a fake process with default identity. */
+export function fakePidFile(pid: number, overrides: Partial<LocalEdgeKit_ProcessIdentity> = {}): string {
+  return LocalEdgeKit_formatPidFile(pid, fakeIdentity(pid, overrides));
+}
+
+/** Fake host plus the recorded effects tests assert on. The supervisor itself is pid 1000. */
 export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
   spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[];
   commands: string[][];
   dirs: string[];
   files: Map<string, string>;
-  processes: Map<number, { pid: number; group: number; port?: number; parent?: number; alive: boolean }>;
+  processes: Map<number, FakeProcess & { alive: boolean }>;
+  /** Every lock file creation attempt, in order. */
+  lockAttempts: string[];
 };
 
 /** In-memory host. Processes are pids with a group, alive flag and optional listening port. */
 export function fakeHost(seed: {
   files?: Record<string, string>;
-  processes?: { pid: number; group: number; port?: number; parent?: number }[];
+  processes?: FakeProcess[];
   ownGroup?: number;
   healthy?: (url: string) => number | null;
   onSpawn?: (host: FakeSupervisorHost, pid: number) => void;
@@ -39,6 +63,7 @@ export function fakeHost(seed: {
   const dirs: string[] = [];
   let clock = 0;
   let nextPid = 9000;
+  const lockAttempts: string[] = [];
   const host: FakeSupervisorHost = {
     signals,
     spawned,
@@ -46,6 +71,7 @@ export function fakeHost(seed: {
     dirs,
     files,
     processes,
+    lockAttempts,
     readText: (filePath) => files.get(filePath) ?? null,
     writeText: (filePath, text) => void files.set(filePath, text),
     ensureDir: (dirPath) => void dirs.push(dirPath),
@@ -53,9 +79,25 @@ export function fakeHost(seed: {
       commands.push([command, ...args]);
       return seed.onCommand?.(host, command, args) ?? { status: 0, stdout: "", stderr: "" };
     },
+    createExclusive: (filePath, text) => {
+      lockAttempts.push(filePath);
+      if (files.has(filePath)) {
+        return false;
+      }
+      files.set(filePath, text);
+      return true;
+    },
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
+    processIdentity: (pid) => {
+      if (pid === 1000) {
+        return fakeIdentity(1000);
+      }
+      const p = processes.get(pid);
+      return p?.alive ? fakeIdentity(pid, { ...(p.uid === undefined ? {} : { uid: p.uid }), ...(p.start === undefined ? {} : { startedAt: p.start }), ...(p.command === undefined ? {} : { command: p.command }) }) : null;
+    },
+    ownPid: () => 1000,
     processGroupOf: (pid) => (processes.get(pid)?.alive ? (processes.get(pid)?.group ?? null) : null),
     parentOf: (pid) => processes.get(pid)?.parent ?? null,
     ownProcessGroup: () => seed.ownGroup ?? 1,
@@ -69,7 +111,7 @@ export function fakeHost(seed: {
       if (live.length === 0) {
         throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
       }
-      if (signal === "SIGTERM" || signal === "SIGKILL") {
+      if (signal === "SIGTERM" || signal === "SIGKILL" || signal === "SIGQUIT") {
         for (const p of live) {
           if (p) p.alive = false;
         }

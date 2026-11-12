@@ -3,8 +3,9 @@
  * project manifest, read from pluggable sources and merged with it.
  *
  * A source is anything with a name and a `load()` that returns extra apps. The built-in file
- * source reads a JSON file with the same rules as the careful writers: the file must sit inside a
- * given root after `realpath`, must not be a symlink, and is opened with `O_NOFOLLOW`. A missing
+ * source reads a JSON file through `LocalEdgeKit_readFileSafe` from safe-write.ts, the same
+ * containment as the careful writers: inside a given root, no symlinked folder below the root, no
+ * symlinked file, opened with `O_NOFOLLOW` and rechecked while the descriptor is held. A missing
  * file means no extra apps. Every extra app is route only (`external`): the supervisor lists,
  * probes and routes it, and never starts, stops or signals its process.
  * Flow: sources -> load + validate -> supervised apps with `source` -> merge (ids and hosts unique).
@@ -17,7 +18,7 @@
  * @testing Node test runner (tsx): npm run test -- src/extra-apps.unit.test.ts
  *
  * @see src/supervisor-cli.ts - Merges the sources before every command.
- * @see src/safe-write.ts - The same containment and symlink rules for writes.
+ * @see src/safe-write.ts - `LocalEdgeKit_readFileSafe`, the contained read this source uses.
  * @documentation reviewed=2026-11-12 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { type LocalEdgeCore_ExposureHostnamesConfig } from "@gg-utils/local-edge-core/exposure";
@@ -55,18 +56,11 @@ export type LocalEdgeKit_ExtraAppsSource = {
 export type LocalEdgeKit_ExtraAppsFileSourceOptions = {
     /** JSON file. A missing file means no extra apps. */
     filePath: string;
-    /** Folder the file must stay inside after `realpath`. Default: the file's own folder. */
+    /** Folder the file must stay inside; no symlinked folder below it. Default: the file's own folder. */
     root?: string | undefined;
     /** Source name. Default: the file path. */
     name?: string | undefined;
 };
-/**
- * Reads a text file inside `root`: lexical and `realpath` containment, no symlinked target, opened
- * with `O_NOFOLLOW`. Returns null when the file does not exist. Throws otherwise.
- */
-export declare function LocalEdgeKit_readFileSafe(filePath: string, options: {
-    root: string;
-}): string | null;
 /**
  * Parses and checks extra-apps JSON. Throws one error listing every problem, prefixed with the
  * source name. Host labels and proxy values are checked again by the router against its config.

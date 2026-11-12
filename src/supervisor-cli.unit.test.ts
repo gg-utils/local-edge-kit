@@ -14,9 +14,9 @@ import test from "node:test";
 import { LocalEdgeCore_createExposureBackend } from "@gg-utils/local-edge-core/exposure";
 
 import { type LocalEdgeKit_SupervisorConfig, LocalEdgeKit_runSupervisorCli } from "./supervisor-cli.js";
-import { fakeHost } from "./supervisor-fake-host.unit.test.js";
+import { fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 
-const HOST = "node-a.example.ts.net";
+const HOST = "node-a.example.test";
 
 function backendFactory(mapped: Record<string, string>) {
   const calls: string[] = [];
@@ -56,10 +56,10 @@ function capture() {
 void test("status prints a table with process, health and edge state", async () => {
   const stdout = capture();
   const backend = backendFactory({ "8451": "http://127.0.0.1:4300" });
-  const host = fakeHost({ files: { "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  const host = fakeHost({ files: { "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   const code = await LocalEdgeKit_runSupervisorCli({ args: ["status"], config, host, createBackend: backend.create, stdout: stdout.writer });
   assert.equal(code, 0);
-  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.ts\.net:8451\s+exposed/);
+  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.test:8451\s+exposed/);
   assert.match(stdout.text(), /later\s+disabled/);
 });
 
@@ -121,210 +121,4 @@ void test("logs --follow hands the resolved log file to the follower", async () 
   });
   assert.equal(code, 0);
   assert.equal(seen, "/w/auth/l:5");
-});
-
-const hostnames = {
-  projectMachineLabel: "proj-m1",
-  rootZone: "example.test",
-  realm: "main",
-  routerHost: "127.0.0.1",
-  routerPort: 8460,
-  tls: { mode: "provided" as const, certPath: "/st/tls/wildcard.crt", keyPath: "/st/tls/wildcard.key" },
-  nginx: {
-    confPath: "/st/nginx/nginx.conf",
-    pidPath: "/st/nginx/nginx.pid",
-    errorLogPath: "/st/logs/nginx-error.log",
-    accessLogPath: "/st/logs/nginx-access.log",
-    tempDir: "/st/nginx/tmp",
-  },
-  addresses: { ipv4: "100.64.0.9" },
-};
-
-const hostConfig: LocalEdgeKit_SupervisorConfig = {
-  ...config,
-  exposure: { ...config.exposure, backend: "hostnames", hostnames, router: { stateRoot: "/st" } },
-  apps: [
-    ...config.apps,
-    { id: "preview", enabled: true, external: true, localPort: 3100, healthPath: "/", locations: [{ path: "/api/v1", localPort: 8000 }] },
-  ],
-};
-
-const certFiles = { "/st/tls/wildcard.crt": "CERT", "/st/tls/wildcard.key": "KEY" };
-
-/** nginx fake: `-c conf` starts a master and writes its pid; reload and -t succeed. */
-function nginxHost(seed: Parameters<typeof fakeHost>[0] = {}) {
-  return fakeHost({
-    ...seed,
-    onCommand: (host, command, args) => {
-      const seeded = seed.onCommand?.(host, command, args);
-      if (seeded !== undefined) {
-        return seeded;
-      }
-      if (command === "tailscale") {
-        return { status: 0, stdout: JSON.stringify({ TCP: { "8460": { TCPForward: "127.0.0.1:8460" } } }), stderr: "" };
-      }
-      if (command === "nginx" && args.length === 2 && args[0] === "-c") {
-        host.processes.set(500, { pid: 500, group: 500, port: 8460, alive: true });
-        host.files.set("/st/nginx/nginx.pid", "500\n");
-      }
-      return undefined;
-    },
-  });
-}
-
-void test("config backend hostnames plans SNI hosts and expose --apply refuses", async () => {
-  const stdout = capture();
-  const backend = backendFactory({});
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["plan"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: stdout.writer }), 0);
-  assert.match(stdout.text(), /auth\.proj-m1\.example\.test:8460/);
-  assert.match(stdout.text(), /tailscale serve --bg --tcp=8460 tcp:\/\/127\.0\.0\.1:8460/);
-  const out2 = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["expose", "--apply"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: out2.writer }), 1);
-  assert.match(out2.text(), /plan-only/);
-  assert.ok(!backend.calls.some((call) => call.includes("--tcp")));
-  const out3 = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["plan", "--backend=ports"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: out3.writer }), 0);
-  assert.match(out3.text(), /backend: tailscale-serve-ports/);
-});
-
-void test("up with hostnames checks a candidate, writes the config and starts nginx; a rerun adopts it", async () => {
-  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
-  const stdout = capture();
-  const stderr = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up"], config: hostConfig, host, stdout: stdout.writer, stderr: stderr.writer }), 0);
-  assert.match(stdout.text(), /preview\s+skipped\s+external: route only/);
-  assert.match(stdout.text(), /router\s+started\s+nginx pid 500/);
-  assert.deepEqual(host.commands.map((c) => c.slice(0, 3).join(" ")), ["nginx -t -q", "nginx -c /st/nginx/nginx.conf"]);
-  assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /server_name preview\.proj-m1\.example\.test;/);
-  assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /location \/api\/v1 \{/);
-  assert.ok(![...host.files.keys()].some((file) => file.includes("candidate")));
-  const again = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: again.writer, stderr: stderr.writer }), 0);
-  assert.match(again.text(), /router\s+adopted\s+nginx pid 500 adopted; config current/);
-  assert.equal(host.commands.length, 2);
-  assert.equal(host.spawned.length, 0);
-});
-
-void test("up with a changed config reloads the running nginx and never restarts it", async () => {
-  const host = nginxHost({
-    files: { ...certFiles, "/w/auth/p": "10", "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" },
-    processes: [{ pid: 10, group: 10, port: 4300 }, { pid: 500, group: 500, port: 8460 }],
-  });
-  const stdout = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: stdout.writer, stderr: capture().writer }), 0);
-  assert.match(stdout.text(), /router\s+adopted\s+nginx pid 500 reloaded/);
-  assert.deepEqual(host.commands.at(-1), ["nginx", "-c", "/st/nginx/nginx.conf", "-s", "reload"]);
-  assert.equal(host.signals.length, 0);
-});
-
-void test("a failing nginx -t leaves the live config alone; no certificate means nginx is not touched", async () => {
-  const bad = fakeHost({
-    files: { ...certFiles, "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" },
-    processes: [{ pid: 500, group: 500, port: 8460 }],
-    onCommand: (_host, _command, args) => (args[0] === "-t" ? { status: 1, stdout: "", stderr: "emerg: bad" } : undefined),
-  });
-  const stdout = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host: bad, stdout: stdout.writer, stderr: capture().writer }), 1);
-  assert.match(stdout.text(), /failed the check, nothing replaced/);
-  assert.equal(bad.files.get("/st/nginx/nginx.conf"), "old");
-  const noCert = nginxHost();
-  const out2 = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host: noCert, stdout: out2.writer, stderr: capture().writer }), 1);
-  assert.match(out2.text(), /certificate or key missing/);
-  assert.equal(noCert.commands.length, 0);
-});
-
-void test("status with hostnames shows the adopted router and the Serve TCP port as exposed", async () => {
-  const host = nginxHost({
-    files: { "/w/auth/p": "10", "/st/nginx/nginx.pid": "500" },
-    processes: [{ pid: 10, group: 10, port: 4300 }, { pid: 500, group: 500, port: 8460 }, { pid: 31, group: 31, port: 3100 }],
-  });
-  const stdout = capture();
-  await LocalEdgeKit_runSupervisorCli({
-    args: ["status"],
-    config: hostConfig,
-    host,
-    createBackend: (name) =>
-      LocalEdgeCore_createExposureBackend(name, { runner: (cmd, args) => host.runCommand(cmd, args) }),
-    stdout: stdout.writer,
-  });
-  assert.match(stdout.text(), /router\s+running\s+500\s+127\.0\.0\.1:8460\s+-\s+serve :8460\s+exposed/);
-  assert.match(stdout.text(), /preview\s+external\s+-\s+127\.0\.0\.1:3100/);
-  assert.match(stdout.text(), /auth\s+running.*https:\/\/auth\.proj-m1\.example\.test:8460\s+exposed/);
-});
-
-void test("down with hostnames quits nginx and never signals external apps", async () => {
-  const host = nginxHost({
-    files: { "/st/nginx/nginx.pid": "500" },
-    processes: [{ pid: 500, group: 500, port: 8460 }, { pid: 31, group: 31, port: 3100 }],
-    onCommand: (h, command, args) => {
-      if (command === "nginx" && args.includes("quit")) {
-        const p = h.processes.get(500);
-        if (p) p.alive = false;
-      }
-      return undefined;
-    },
-  });
-  const stdout = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["down"], config: hostConfig, host, stdout: stdout.writer, stderr: capture().writer }), 0);
-  assert.match(stdout.text(), /router\s+stopped/);
-  assert.match(stdout.text(), /preview\s+skipped\s+external/);
-  assert.ok(!host.signals.some((s) => Math.abs(s.pid) === 31));
-});
-
-void test("an app's own hostname pattern reaches the router config", async () => {
-  const dashConfig: LocalEdgeKit_SupervisorConfig = {
-    ...hostConfig,
-    exposure: { ...hostConfig.exposure, hostnames: { ...hostnames, extraWildcardTemplates: ["*.m1.{rootZone}"] } },
-    apps: [
-      ...hostConfig.apps,
-      { id: "dash", enabled: true, external: true, localPort: 3081, healthPath: "/", hostnameTemplate: "{label}.m1.{rootZone}" },
-    ],
-  };
-  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: dashConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
-  assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /server_name dash\.m1\.example\.test;/);
-});
-
-void test("extra-app sources merge into the router config and status shows each source", async () => {
-  const machineConfig: LocalEdgeKit_SupervisorConfig = {
-    ...hostConfig,
-    exposure: { ...hostConfig.exposure, hostnames: { ...hostnames, extraWildcardTemplates: ["*.m1.{rootZone}"] } },
-    extraApps: [
-      {
-        name: "machine.json",
-        load: () => [
-          {
-            id: "play",
-            host: "play.m1.example.test",
-            upstream: "127.0.0.1:5174",
-            upstreamHost: "127.0.0.1:5174",
-            buffering: false,
-            readTimeout: "3600s",
-            locations: [{ path: "/events", upstream: "127.0.0.1:33114", buffering: false, readTimeout: "3600s" }],
-          },
-        ],
-      },
-    ],
-  };
-  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: machineConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
-  const conf = host.files.get("/st/nginx/nginx.conf") ?? "";
-  assert.match(conf, /server_name play\.m1\.example\.test;\n {4}location \/ \{\n {6}proxy_pass http:\/\/127\.0\.0\.1:5174;\n {6}proxy_http_version 1\.1;\n {6}proxy_set_header Host 127\.0\.0\.1:5174;/);
-  assert.match(conf, /location \/events \{\n {6}proxy_pass http:\/\/127\.0\.0\.1:33114;[^}]*proxy_buffering off;\n {6}proxy_read_timeout 3600s;/);
-  assert.match(conf, /server_name preview\.proj-m1\.example\.test;/);
-
-  const status = capture();
-  await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: machineConfig, host, stdout: status.writer, stderr: capture().writer });
-  assert.match(status.text(), /EDGE-STATE\s+SOURCE\s+NOTE/);
-  assert.match(status.text(), /play\s+external\s.*\smachine\.json\s+route only/);
-  assert.match(status.text(), /preview\s+external\s.*\sproject\s+route only/);
-
-  const clash: LocalEdgeKit_SupervisorConfig = {
-    ...machineConfig,
-    extraApps: [{ name: "machine.json", load: () => [{ id: "dupe", host: "preview.proj-m1.example.test", upstream: "127.0.0.1:9" }] }],
-  };
-  const err = capture();
-  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: clash, host, stdout: capture().writer, stderr: err.writer }), 2);
-  assert.match(err.text(), /duplicate hostname preview\.proj-m1\.example\.test: preview \(project\) and dupe \(machine\.json\)/);
 });

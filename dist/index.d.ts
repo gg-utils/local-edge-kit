@@ -50,3 +50,4 @@ export * from "./supervisor-cli.js";
 export * from "./supervisor-router.js";
 export * from "./extra-apps.js";
 export * from "./safe-write.js";
+export * from "./process-identity.js";

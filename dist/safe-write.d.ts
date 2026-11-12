@@ -1,37 +1,139 @@
 /**
- * @fileoverview Careful file writes for supervisor state: pid files, rendered configs and logs.
+ * @fileoverview Careful file writes for supervisor state: pid files, lock files, rendered
+ * configs and logs. Every write stays inside a caller-given root.
  *
- * Every write first checks that the target sits inside a given root, by `realpath` of the root
- * and of the target's folder, so a symlinked folder cannot point a write elsewhere. A target that
- * is itself a symlink is refused. Whole-file writes go to a temp file in the same folder, are
- * synced, then renamed over the target, keeping the target's mode when it exists. Log files are
- * opened for append with `O_NOFOLLOW`.
- * Flow: target + root -> containment and symlink checks -> temp write + fsync -> rename -> dir fsync.
+ * Node has no `openat`/`mkdirat`/`renameat`, so a write cannot be bound to a directory
+ * descriptor. Instead each folder between the root and the target is walked one segment at a
+ * time: it is `lstat`ed (never followed), created with `dirMode` only when missing and only below
+ * a folder already checked, and its device and inode are recorded. Nothing is created until the
+ * lexical containment check passed, and nothing is created below a symlink. After the target
+ * (or its temp file) is opened with `O_NOFOLLOW`, the whole chain is checked again while the
+ * descriptor is held: every folder must still be a real folder with the recorded device and
+ * inode, and the descriptor must be the file at the path. Whole-file writes check the chain a
+ * third time immediately before the rename.
+ *
+ * Trust boundary: the root itself and its ancestors are trusted (they may be symlinks, such as
+ * `/tmp` on macOS). Folders below the root must not be writable by another user. Within that
+ * boundary every swap the checks can observe is refused; what remains is the window between the
+ * last check and the `rename` system call, which only a process running as the same user can
+ * use, and which Node cannot close without `renameat`.
+ *
+ * New files get `mode` (0o600) and new folders `dirMode` (0o700), independent of the umask
+ * (the umask can only remove bits). An existing file keeps its mode.
+ * Flow: lexical check -> segment walk (lstat, mkdir one level, record dev/ino) -> open
+ * O_NOFOLLOW -> recheck chain + fd identity -> write + fsync -> recheck chain -> rename -> dir fsync.
+ * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, the same
+ * `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are read.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_writeFileAtomic("/w/app/.local/app.pid", "123\n", { root: "/w/app" });
+ * const fd = LocalEdgeKit_openAppendSafe("/w/app/.local/app.log", { root: "/w/app" });
+ * ```
  *
  * @testing Node test runner (tsx): npm run test -- src/safe-write.unit.test.ts
  *
- * @see src/supervisor.ts - Uses these writers for pid files and logs.
+ * @see src/supervisor.ts - Uses these writers for pid files, locks and logs.
  * @documentation reviewed=2026-11-12 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
+/** Test seams called at the points where a swap could happen. Leave out in real use. */
+export type LocalEdgeKit_SafeWriteHooks = {
+    /** After the folder walk, before the target or temp file is opened. */
+    afterWalk?: (() => void) | undefined;
+    /** After the target or temp file was opened, before the chain is checked again. */
+    afterOpen?: (() => void) | undefined;
+    /** After the temp file was written and synced, before the last check and the rename. */
+    beforeRename?: (() => void) | undefined;
+};
 /** Options shared by the careful writers. */
 export type LocalEdgeKit_SafeWriteOptions = {
-    /** Folder the target must stay inside, after resolving symlinks. */
+    /** Folder the target must stay inside. The root and its ancestors are trusted. */
     root: string;
     /** Mode for a new file. An existing file keeps its mode. Default 0o600. */
     mode?: number | undefined;
     /** Mode for folders created on the way. Default 0o700. */
     dirMode?: number | undefined;
+    /** Test seams. */
+    hooks?: LocalEdgeKit_SafeWriteHooks | undefined;
 };
 /**
- * Checks that `filePath` stays inside `root` (lexically and after `realpath` of its folder) and
- * is not a symlink, creating missing folders with `dirMode`. Returns the resolved target path.
- * Throws with a `local-edge-kit-safe-write-` code otherwise.
+ * Reads a UTF-8 file inside `root` with the writers' containment rules: lexical containment, a
+ * segment walk that refuses symlinked folders, no symlinked target, an `O_NOFOLLOW` open, and a
+ * recheck of the folder chain and the descriptor's identity before reading.
+ *
+ * @param filePath - File to read; must be inside `options.root`.
+ * @param options - Root the file must stay inside. The root itself may be a symlink.
+ * @returns The file's text, or `null` when the file or a folder on the way does not exist.
+ * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root, is a
+ * symlink or not a regular file, a folder on the way is a symlink, or a folder or the file
+ * changed while it was opened.
+ * @example
+ * ```typescript
+ * const text = LocalEdgeKit_readFileSafe("/home/me/.config/edge/apps.json", { root: "/home/me/.config/edge" });
+ * ```
  */
-export declare function LocalEdgeKit_prepareSafeTarget(filePath: string, options: LocalEdgeKit_SafeWriteOptions): string;
+export declare function LocalEdgeKit_readFileSafe(filePath: string, options: {
+    root: string;
+}): string | null;
 /**
- * Replaces a file's whole content: temp file in the same folder, fsync, rename over the target,
- * fsync the folder. Keeps the target's mode when it exists; new files get `mode` (0o600).
+ * Creates a folder (and missing folders above it, up to `root`) without following symlinks.
+ *
+ * @param dirPath - Folder to create; must be inside `options.root`.
+ * @param options - Root and `dirMode` (default 0o700).
+ * @returns The folder's path below the real root.
+ * @throws Error with a `local-edge-kit-safe-write-` code when the folder is outside the root, a
+ * folder on the way is a symlink or not a folder. Nothing is created below a refused folder.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_ensureSafeDir("/w/state/nginx/temp", { root: "/w/state" });
+ * ```
+ */
+export declare function LocalEdgeKit_ensureSafeDir(dirPath: string, options: LocalEdgeKit_SafeWriteOptions): string;
+/**
+ * Replaces a file's whole content inside `root`: temp file beside the target (exclusive,
+ * `O_NOFOLLOW`), fsync, rename over the target, fsync the folder.
+ *
+ * @param filePath - Target file; must be inside `options.root` and not a symlink.
+ * @param text - UTF-8 content.
+ * @param options - Root, new-file `mode` (0o600), folder `dirMode` (0o700) and test hooks.
+ * @throws Error with a `local-edge-kit-safe-write-` code when the target is outside the root,
+ * is a symlink or not a regular file, a folder on the way is a symlink, or a folder changed
+ * during the write. The temp file is removed and the target is untouched on every failure.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_writeFileAtomic("/w/app/.local/app.pid", "123\n", { root: "/w/app" });
+ * ```
  */
 export declare function LocalEdgeKit_writeFileAtomic(filePath: string, text: string, options: LocalEdgeKit_SafeWriteOptions): void;
-/** Opens a log file for append after the same checks, never following a symlink. Returns the fd. */
+/**
+ * Creates a new file inside `root` only when none exists (`O_EXCL`), as a lock or marker.
+ *
+ * @param filePath - File to create; must be inside `options.root`.
+ * @param text - Content written to the new file.
+ * @param options - Root, `mode` (0o600), `dirMode` (0o700) and test hooks.
+ * @returns True when this call created the file, false when it already existed.
+ * @throws Error with a `local-edge-kit-safe-write-` code on the same refusals as
+ * `LocalEdgeKit_writeFileAtomic`; a file created before a refusal is removed again.
+ * @example
+ * ```typescript
+ * if (!LocalEdgeKit_createFileExclusive("/w/app/.local/app.pid.lock", "123\n", { root: "/w/app" })) {
+ *   // another supervisor holds the lock
+ * }
+ * ```
+ */
+export declare function LocalEdgeKit_createFileExclusive(filePath: string, text: string, options: LocalEdgeKit_SafeWriteOptions): boolean;
+/**
+ * Opens a log file for append inside `root`, never following a symlink. A new file gets `mode`
+ * (0o600); an existing one keeps its mode.
+ *
+ * @param filePath - Log file; must be inside `options.root`.
+ * @param options - Root, `mode`, `dirMode` and test hooks.
+ * @returns An open descriptor; the caller closes it.
+ * @throws Error with a `local-edge-kit-safe-write-` code when the file is outside the root, is a
+ * symlink or not a regular file, or a folder on the way is a symlink or changed after the open.
+ * @example
+ * ```typescript
+ * const fd = LocalEdgeKit_openAppendSafe("/w/app/.local/app.log", { root: "/w/app" });
+ * ```
+ */
 export declare function LocalEdgeKit_openAppendSafe(filePath: string, options: LocalEdgeKit_SafeWriteOptions): number;
