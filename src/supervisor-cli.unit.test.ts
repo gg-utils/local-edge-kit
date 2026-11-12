@@ -122,3 +122,35 @@ void test("logs --follow hands the resolved log file to the follower", async () 
   assert.equal(code, 0);
   assert.equal(seen, "/w/auth/l:5");
 });
+
+void test("config backend hostnames plans SNI hosts and expose --apply refuses", async () => {
+  const stdout = capture();
+  const backend = backendFactory({});
+  const hostConfig: LocalEdgeKit_SupervisorConfig = {
+    ...config,
+    exposure: {
+      ...config.exposure,
+      backend: "hostnames",
+      hostnames: {
+        realm: "main",
+        method: "nginx",
+        machine: "m3",
+        rootZone: "example.internal",
+        routerHost: "127.0.0.1",
+        routerPort: 8460,
+        tls: { mode: "mkcert", certDir: "/certs" },
+        dns: { listenAddress: "127.0.0.1", port: 53535, resolverDir: "/etc/resolver", logPath: "/l" },
+      },
+    },
+  };
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["plan"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: stdout.writer }), 0);
+  assert.match(stdout.text(), /auth\.main\.nginx\.m3\.example\.internal:8460/);
+  assert.match(stdout.text(), /tailscale serve --tcp=8460 tcp:\/\/127\.0\.0\.1:8460/);
+  const out2 = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["expose", "--apply"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: out2.writer }), 1);
+  assert.match(out2.text(), /plan-only/);
+  assert.equal(backend.calls.length, 0);
+  const out3 = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["plan", "--backend=ports"], config: hostConfig, host: fakeHost(), createBackend: backend.create, stdout: out3.writer }), 0);
+  assert.match(out3.text(), /backend: tailscale-serve-ports/);
+});

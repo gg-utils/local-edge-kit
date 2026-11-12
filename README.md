@@ -83,7 +83,9 @@ flowchart TD
 ## App Supervisor
 
 `@gg-utils/local-edge-kit/supervisor-cli` runs a set of loopback apps from one command and
-exposes them through a core exposure backend (`tailscale-serve-ports` by default).
+exposes them through a core exposure backend. Set `exposure.backend` to `ports` (the default:
+one tailnet HTTPS port per app) or `hostnames` (plan-only SNI hosts, configured by
+`exposure.hostnames`). `--backend=<name>` overrides the choice for one command.
 
 ```ts
 import { LocalEdgeKit_runSupervisorCli } from "@gg-utils/local-edge-kit/supervisor-cli";

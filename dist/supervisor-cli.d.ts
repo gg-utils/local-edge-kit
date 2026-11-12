@@ -12,7 +12,7 @@
  * @see src/supervisor.ts - Process inspection, start, stop and health.
  * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
-import { type LocalEdgeCore_ExposureBackend, type LocalEdgeCore_ExposureManifest } from "@gg-utils/local-edge-core/exposure";
+import { type LocalEdgeCore_ExposureBackend, type LocalEdgeCore_ExposureHostnamesConfig, type LocalEdgeCore_ExposureManifest } from "@gg-utils/local-edge-core/exposure";
 import { type LocalEdgeKit_SupervisedApp, type LocalEdgeKit_SupervisorHost, type LocalEdgeKit_SupervisorWriter } from "./supervisor.js";
 /** Project-owned supervisor config. */
 export type LocalEdgeKit_SupervisorConfig = {
@@ -20,8 +20,13 @@ export type LocalEdgeKit_SupervisorConfig = {
     commandName?: string | undefined;
     apps: readonly LocalEdgeKit_SupervisedApp[];
     exposure: {
-        /** Backend used when `--backend` is not given. Defaults to the core default. */
-        backend?: string | undefined;
+        /**
+         * Backend used when `--backend` is not given: `ports` (default, tailnet HTTPS port per app)
+         * or `hostnames` (plan-only SNI hosts). Any registered core backend name also works.
+         */
+        backend?: "ports" | "hostnames" | (string & {}) | undefined;
+        /** Settings for the `hostnames` backend. */
+        hostnames?: LocalEdgeCore_ExposureHostnamesConfig | undefined;
         /** Edge ports that are never mapped, changed or turned off. */
         protectedPorts: readonly number[];
         hostname?: string | undefined;

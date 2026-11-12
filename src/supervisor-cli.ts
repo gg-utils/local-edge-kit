@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 
 import {
   type LocalEdgeCore_ExposureBackend,
+  type LocalEdgeCore_ExposureHostnamesConfig,
   type LocalEdgeCore_ExposureManifest,
   type LocalEdgeCore_ExposureStatusEntry,
   LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND,
@@ -44,8 +45,13 @@ export type LocalEdgeKit_SupervisorConfig = {
   commandName?: string | undefined;
   apps: readonly LocalEdgeKit_SupervisedApp[];
   exposure: {
-    /** Backend used when `--backend` is not given. Defaults to the core default. */
-    backend?: string | undefined;
+    /**
+     * Backend used when `--backend` is not given: `ports` (default, tailnet HTTPS port per app)
+     * or `hostnames` (plan-only SNI hosts). Any registered core backend name also works.
+     */
+    backend?: "ports" | "hostnames" | (string & {}) | undefined;
+    /** Settings for the `hostnames` backend. */
+    hostnames?: LocalEdgeCore_ExposureHostnamesConfig | undefined;
     /** Edge ports that are never mapped, changed or turned off. */
     protectedPorts: readonly number[];
     hostname?: string | undefined;
@@ -95,11 +101,13 @@ export function LocalEdgeKit_buildExposureManifest(
     protectedPorts: config.exposure.protectedPorts,
     hostname: config.exposure.hostname,
     rootZone: config.exposure.rootZone,
+    hostnames: config.exposure.hostnames,
     apps: config.apps.map((app) => ({
       id: app.id,
       enabled: app.enabled,
       localPort: app.localPort,
       edgePort: app.edgePort,
+      edgeName: app.edgeName,
     })),
   };
 }
@@ -124,7 +132,7 @@ function LocalEdgeKit_supervisorUsage(config: LocalEdgeKit_SupervisorConfig): st
     "  down [app...]                        stop apps (process group, TERM then KILL)",
     "  health [app...] [--json]             probe health paths on 127.0.0.1",
     "  logs <app> [-n N] [-f]               tail an app log",
-    "  plan [--backend=<name>] [--remove] [--json]   show exposure actions (never changes anything)",
+    "  plan [--backend=ports|hostnames|<name>] [--remove] [--json]   show exposure actions (never changes anything)",
     "  expose [--backend=<name>] [--apply]  map edge URLs; dry run without --apply",
     "  unexpose [--backend=<name>] [--apply] remove edge URLs this config owns; dry run without --apply",
     "",

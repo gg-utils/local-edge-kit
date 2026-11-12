@@ -44,11 +44,13 @@ export function LocalEdgeKit_buildExposureManifest(config) {
         protectedPorts: config.exposure.protectedPorts,
         hostname: config.exposure.hostname,
         rootZone: config.exposure.rootZone,
+        hostnames: config.exposure.hostnames,
         apps: config.apps.map((app) => ({
             id: app.id,
             enabled: app.enabled,
             localPort: app.localPort,
             edgePort: app.edgePort,
+            edgeName: app.edgeName,
         })),
     };
 }
@@ -68,7 +70,7 @@ function LocalEdgeKit_supervisorUsage(config) {
         "  down [app...]                        stop apps (process group, TERM then KILL)",
         "  health [app...] [--json]             probe health paths on 127.0.0.1",
         "  logs <app> [-n N] [-f]               tail an app log",
-        "  plan [--backend=<name>] [--remove] [--json]   show exposure actions (never changes anything)",
+        "  plan [--backend=ports|hostnames|<name>] [--remove] [--json]   show exposure actions (never changes anything)",
         "  expose [--backend=<name>] [--apply]  map edge URLs; dry run without --apply",
         "  unexpose [--backend=<name>] [--apply] remove edge URLs this config owns; dry run without --apply",
         "",

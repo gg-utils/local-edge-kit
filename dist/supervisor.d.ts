@@ -34,6 +34,8 @@ export type LocalEdgeKit_SupervisedApp = {
     localPort: number;
     /** Edge port for port-based exposure backends. */
     edgePort?: number | undefined;
+    /** Host label for name-based backends. Defaults to `id`. */
+    edgeName?: string | undefined;
     /** HTTP path that must answer 2xx/3xx for the app to count as healthy. */
     healthPath: string;
     /** Optional second HTTP path that must answer before the app counts as ready. */
