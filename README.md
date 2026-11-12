@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#main
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#a5b912b"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
   }
 }
 ```
@@ -139,14 +139,17 @@ the new hash. If the reload or start fails or is not confirmed, the previous con
 back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
 and nothing is recorded as active, so the next `up` tries again. Each rollback step (stop, record
 not active, restore or remove the config) runs even when an earlier one failed, and the failures are
-listed in the failed result's `errors`. If nginx confirmed the new config but its state file cannot
+listed in the failed result's `errors`; a host call that throws while the config may already be
+replaced (clearing the old marker socket, polling the marker, reading the new pid) is rolled back the
+same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says an nginx started by this run may still be running (with its pid when known) and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
 be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
 place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
 is an `nginx: master process` of our user whose single `-c` value is the same file as this config
 after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
 other process there is `unverified` and is never signalled or replaced. `down` sends SIGQUIT, checking the
-identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+identity again right before the signal; if nginx quit but its state file cannot be removed, `down` still
+returns `ok: true` (action `stopped`) with the error in `errors`, and the next `up` starts nginx normally. `status` adds a `router` row with the nginx pid and the
 Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
 is never changed by the supervisor.
 
@@ -180,7 +183,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#main local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -222,7 +225,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.3.0"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:

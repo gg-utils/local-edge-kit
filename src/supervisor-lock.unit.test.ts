@@ -150,6 +150,55 @@ void test("a takeover guard left by a dead contender is itself taken over, then 
   assert.deepEqual([...shared.files.keys()].filter((f) => f.includes("takeover")), []);
 });
 
+/** The lock, then a chain of `count` abandoned guards: each is the guard of the one before it. */
+function abandonedChain(count: number): Record<string, string> {
+  const key = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
+  const files: Record<string, string> = {};
+  let file = lockFile;
+  let text = fakePidFile(4242);
+  files[file] = text;
+  for (let level = 0; level < count; level += 1) {
+    file = `${file}.takeover-${key(text)}`;
+    text = `${2100 + level}\n${JSON.stringify(fakeIdentity(2100 + level))}\n${String(level).repeat(32).slice(0, 32).replace(/[^0-9a-f]/g, "a")}\n`;
+    files[file] = text;
+  }
+  return files;
+}
+
+void test("the takeover bounds: one abandoned guard still takes the lock, a longer chain takes more calls, a fifth deep guard is refused", () => {
+  const guards = (w: ReturnType<typeof world>): number => [...w.shared.files.keys()].filter((f) => f.includes("takeover")).length;
+  const acquire = (w: ReturnType<typeof world>, pid: number): Taken => LocalEdgeKit_acquireSupervisorLock(app, w.contender(pid));
+
+  // 0 or 1 abandoned guards: one call takes the lock (clear the guard, remove the stale lock, publish: 3 attempts).
+  for (const count of [0, 1]) {
+    const w = world(abandonedChain(count));
+    const taken = acquire(w, 2001);
+    assert.ok("lock" in taken, `${String(count)} guards: ${"error" in taken ? taken.error : ""}`);
+    assert.equal(guards(w), 0);
+  }
+
+  // 2 to 4: each of the 3 attempts clears one abandoned guard or the lock, so the first call gives up
+  // with `could not take` after making progress, and the next call finishes the job.
+  for (const count of [2, 4]) {
+    const w = world(abandonedChain(count));
+    const first = acquire(w, 2001);
+    assert.ok("error" in first, `${String(count)} guards`);
+    assert.match(first.error, /could not take/);
+    assert.equal(guards(w), Math.max(count - 3, 0), `${String(count)} guards: the first call cleared three`);
+    const second = acquire(w, 2002);
+    assert.ok("lock" in second, `${String(count)} guards, second call: ${"error" in second ? second.error : ""}`);
+    assert.equal(guards(w), 0);
+  }
+
+  // 5 deep: the recursion reaches LOCAL_EDGE_KIT_LOCK_MAX_GUARD_DEPTH (4) in the first attempt and refuses.
+  const deep = world(abandonedChain(5));
+  const refused = acquire(deep, 2001);
+  assert.ok("error" in refused);
+  assert.match(refused.error, /too many abandoned takeover guards/);
+  assert.match(deep.shared.files.get(lockFile) ?? "", /^4242\n/, "the stale lock was left alone");
+  assert.equal(guards(deep), 5, "nothing was removed");
+});
+
 void test("release removes only the releaser's own lock", () => {
   const { contender, shared } = world({});
   const a = contender(2001);

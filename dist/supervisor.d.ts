@@ -373,7 +373,15 @@ export type LocalEdgeKit_SupervisorLock = {
  *    nothing. Every lock carries a random token (an older version's lock carries the identity
  *    of a process that is now gone), so no later lock has S's bytes.
  * 4. A guard whose holder died is itself stale and is taken over by the same rule, under the
- *    guard `<guard>.takeover-<k>` (at most four levels deep).
+ *    guard `<guard>.takeover-<k>`. Two bounds apply, and the second is the tighter one:
+ *    a) One takeover call follows a chain of abandoned guards at most four deep
+ *       (`LOCAL_EDGE_KIT_LOCK_MAX_GUARD_DEPTH`); an abandoned fifth guard is refused with an
+ *       error that says to remove them by hand, and nothing is removed.
+ *    b) The acquire loop below makes at most three attempts, and each attempt removes only one
+ *       file (the deepest abandoned guard, or else the stale lock) before it retries; the last
+ *       attempt must publish the lock. So one call takes the lock when at most one guard is
+ *       abandoned. With two to four abandoned guards the call returns `could not take` after
+ *       clearing three files, and calling again continues from there.
  * 5. A lock without a pid and a complete identity (empty or partial) is never removed
  *    automatically: an older version, which wrote after an exclusive open, could still be
  *    writing it. The caller gets an error that says to remove it by

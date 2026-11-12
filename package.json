@@ -1,6 +1,6 @@
 {
   "name": "@gg-utils/local-edge-kit",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "description": "Reusable local-edge command kit for project-owned local-edge.config.ts adapters.",
   "license": "MIT",
   "type": "module",
@@ -166,7 +166,7 @@
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {
-    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#3682fff90f588bebd53f38ac999075a0ab015792",
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#v0.4.0",
     "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#v0.2.0",
     "ink": "6.8.0",
     "react": "19.3.1"
