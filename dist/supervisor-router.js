@@ -20,7 +20,8 @@
  * but never activated config is reloaded on the next run. A rendered config is checked with
  * `nginx -t` as a candidate file before it replaces the real one; when the reload or start then
  * fails or is not confirmed in time, the previous bytes are put back (or the file is removed
- * when there was none) and nothing is recorded as active, so the next run tries again.
+ * when there was none), an nginx this run started is stopped, and nothing is recorded as
+ * active, so the next run tries again.
  *
  * Files: every router file stays inside `stateRoot` and is written through `safe-write.ts`
  * (folders walked without following symlinks and checked again before the rename; the
@@ -275,8 +276,10 @@ function LocalEdgeKit_runNginx(host, bin, args) {
  * Brings the router up. Renders the config; when it differs from the file on disk, checks a
  * candidate with `nginx -t` and replaces the file atomically. Then activates it: SIGHUP to a
  * verified running nginx, or starts nginx when none runs, and polls the activation marker until
- * it answers the new render's hash. When the reload fails or is not confirmed in time, the
- * previous bytes are restored and nothing is recorded as active. Never restarts a running nginx
+ * it answers the new render's hash. When the reload or start fails or is not confirmed in time,
+ * one rollback runs: an nginx this run started is stopped (SIGQUIT, identity checked again), the
+ * previous bytes are restored (or a config this run created is removed), and nothing is
+ * recorded as active. Never restarts a running nginx
  * and never touches an unverified one.
  *
  * @param options - Manifest with `hostnames` settings, router settings, host and progress writer.
@@ -361,41 +364,56 @@ export function LocalEdgeKit_routerUp(options) {
             host.sleepSync(200);
         }
     };
-    /** Records the pid with no confirmed config, so the next run reloads instead of adopting. */
-    const recordUnconfirmed = (pid, identity) => {
-        try {
-            LocalEdgeKit_writeRouterState(host, router, { pid, identity, activeConfigSha256: null });
-        }
-        catch {
-            // The state file is advisory here; without it the next run also reloads.
-        }
-    };
-    const restore = (reason) => {
-        if (!changed) {
-            return fail(reason);
-        }
-        try {
-            if (previous === null) {
-                host.removeFile(nginx.confPath);
+    /**
+     * The one rollback for every failure after the file may have been replaced, on the reload and
+     * the start path alike:
+     * 1. `stop`: quit the nginx this run started (it was verified ours by identity, and the
+     *    identity is read again before the signal), so no router keeps running a config that was
+     *    never confirmed;
+     * 2. `unconfirmed`: record that pid with no active config, so the next run signals again
+     *    instead of adopting;
+     * 3. put the previous bytes back, or remove a config this run created.
+     */
+    const rollBack = (reason, steps = {}) => {
+        const notes = [];
+        if (steps.unconfirmed) {
+            if (steps.stop) {
+                const quit = LocalEdgeKit_quitVerifiedRouter(host, router, steps.unconfirmed.pid, steps.unconfirmed.identity);
+                notes.push(quit === null ? `nginx pid ${String(steps.unconfirmed.pid)} it started was stopped` : `stopping the nginx it started failed: ${quit}`);
             }
-            else {
-                host.writeText(nginx.confPath, previous, { ...root, mode: 0o600 });
+            try {
+                LocalEdgeKit_writeRouterState(host, router, { pid: steps.unconfirmed.pid, identity: steps.unconfirmed.identity, activeConfigSha256: null });
+                notes.push("not recorded as active");
             }
-            return fail(`${reason}; previous config restored`);
+            catch (error) {
+                notes.push(`recording it as not active failed: ${error.message}`);
+            }
         }
-        catch (error) {
-            return fail(`${reason}; restoring the previous config also failed: ${error.message}`);
+        if (changed) {
+            try {
+                if (previous === null) {
+                    host.removeFile(nginx.confPath);
+                    notes.push("the config it created was removed");
+                }
+                else {
+                    host.writeText(nginx.confPath, previous, { ...root, mode: 0o600 });
+                    notes.push("previous config restored");
+                }
+            }
+            catch (error) {
+                notes.push(`restoring the previous config also failed: ${error.message}`);
+            }
         }
+        return fail([reason, ...notes].join("; "));
     };
     if (owner.kind === "ours") {
         const reloaded = LocalEdgeKit_signalVerified(host, owner.pid, owner.identity, "SIGHUP");
         if (reloaded !== null) {
-            return restore(`reload failed: ${reloaded}`);
+            return rollBack(`reload failed: ${reloaded}`);
         }
         const unconfirmed = confirm();
         if (unconfirmed !== null) {
-            recordUnconfirmed(owner.pid, owner.identity);
-            return restore(`reload not activated: ${unconfirmed}; not recorded as active`);
+            return rollBack(`reload not activated: ${unconfirmed}`, { unconfirmed: { pid: owner.pid, identity: owner.identity } });
         }
         try {
             LocalEdgeKit_writeRouterState(host, router, { pid: owner.pid, identity: owner.identity, activeConfigSha256: sha });
@@ -409,20 +427,22 @@ export function LocalEdgeKit_routerUp(options) {
     host.removeFile(rendered.socketPath);
     const started = LocalEdgeKit_runNginx(host, bin, ["-c", nginx.confPath]);
     if (started !== null) {
-        return restore(started);
+        return rollBack(started);
     }
     const newPid = LocalEdgeKit_readPidFile(host, nginx.pidPath);
     const identity = newPid === null ? null : host.processIdentity(newPid);
     if (newPid === null || identity === null) {
-        return restore("nginx returned 0 but its pid file names no live process");
+        return rollBack("nginx returned 0 but its pid file names no live process");
     }
     if (!LocalEdgeKit_looksLikeOurNginx(host, identity, nginx.confPath)) {
-        return fail(`nginx returned 0 but pid ${String(newPid)} is not an nginx master for this config; not recorded`);
+        return rollBack(`nginx returned 0 but pid ${String(newPid)} is not an nginx master for this config; not recorded or signalled`);
     }
     const unconfirmedStart = confirm();
     if (unconfirmedStart !== null) {
-        recordUnconfirmed(newPid, identity);
-        return fail(`nginx pid ${String(newPid)} started but not activated: ${unconfirmedStart}; not recorded as active`);
+        return rollBack(`nginx pid ${String(newPid)} started but not activated: ${unconfirmedStart}`, {
+            unconfirmed: { pid: newPid, identity },
+            stop: true,
+        });
     }
     try {
         LocalEdgeKit_writeRouterState(host, router, { pid: newPid, identity, activeConfigSha256: sha });
@@ -456,23 +476,33 @@ export function LocalEdgeKit_routerDown(options) {
     if (owner.kind === "unverified") {
         return { appId: id, ok: false, action: "failed", message: `not stopping: ${owner.message}` };
     }
-    const quit = LocalEdgeKit_signalVerified(host, owner.pid, owner.identity, "SIGQUIT");
+    const quit = LocalEdgeKit_quitVerifiedRouter(host, router, owner.pid, owner.identity);
+    return {
+        appId: id,
+        ok: quit === null,
+        action: quit === null ? "stopped" : "failed",
+        message: quit ?? `nginx pid ${String(owner.pid)} quit`,
+    };
+}
+/**
+ * Sends SIGQUIT to a verified nginx (identity read again right before the signal) and waits up
+ * to `stopTimeoutMs` for it to exit; removes the state file once it has.
+ *
+ * @returns null when it quit, otherwise why not.
+ */
+function LocalEdgeKit_quitVerifiedRouter(host, router, pid, identity) {
+    const quit = LocalEdgeKit_signalVerified(host, pid, identity, "SIGQUIT");
     if (quit !== null) {
-        return { appId: id, ok: false, action: "failed", message: quit };
+        return quit;
     }
-    const stillOurs = () => LocalEdgeKit_verifyProcessIdentity({ pid: owner.pid, recorded: owner.identity, current: host.processIdentity(owner.pid) }).ok;
+    const stillOurs = () => LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
     const deadline = host.now() + (router.stopTimeoutMs ?? 10_000);
     while (stillOurs() && host.now() < deadline) {
         host.sleepSync(200);
     }
-    const stopped = !stillOurs();
-    if (stopped) {
-        host.removeFile(LocalEdgeKit_routerStatePath(router));
+    if (stillOurs()) {
+        return "nginx still running after quit";
     }
-    return {
-        appId: id,
-        ok: stopped,
-        action: stopped ? "stopped" : "failed",
-        message: stopped ? `nginx pid ${String(owner.pid)} quit` : "nginx still running after quit",
-    };
+    host.removeFile(LocalEdgeKit_routerStatePath(router));
+    return null;
 }

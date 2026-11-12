@@ -135,8 +135,9 @@ config carries a loopback-only marker: a server on the unix socket
 `<folder of nginx.pidPath>/confirm.sock` (or `router.confirm.socketPath`) that answers
 `/local-edge-config` with the SHA-256 of the render. After the signal or start, `up` polls it
 (`router.confirm.timeoutMs`, default 5 s) and records the config as active only once it answers
-the new hash. If the reload fails or is not confirmed, the previous config bytes are put back and
-nothing is recorded as active, so the next `up` tries again. The router counts as ours only when
+the new hash. If the reload or start fails or is not confirmed, the previous config bytes are put
+back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
+and nothing is recorded as active, so the next `up` tries again. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
 is an `nginx: master process` of our user whose single `-c` value is the same file as this config
 after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any

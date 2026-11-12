@@ -20,7 +20,8 @@
  * but never activated config is reloaded on the next run. A rendered config is checked with
  * `nginx -t` as a candidate file before it replaces the real one; when the reload or start then
  * fails or is not confirmed in time, the previous bytes are put back (or the file is removed
- * when there was none) and nothing is recorded as active, so the next run tries again.
+ * when there was none), an nginx this run started is stopped, and nothing is recorded as
+ * active, so the next run tries again.
  *
  * Files: every router file stays inside `stateRoot` and is written through `safe-write.ts`
  * (folders walked without following symlinks and checked again before the rename; the
@@ -133,8 +134,10 @@ export declare function LocalEdgeKit_inspectRouter(options: {
  * Brings the router up. Renders the config; when it differs from the file on disk, checks a
  * candidate with `nginx -t` and replaces the file atomically. Then activates it: SIGHUP to a
  * verified running nginx, or starts nginx when none runs, and polls the activation marker until
- * it answers the new render's hash. When the reload fails or is not confirmed in time, the
- * previous bytes are restored and nothing is recorded as active. Never restarts a running nginx
+ * it answers the new render's hash. When the reload or start fails or is not confirmed in time,
+ * one rollback runs: an nginx this run started is stopped (SIGQUIT, identity checked again), the
+ * previous bytes are restored (or a config this run created is removed), and nothing is
+ * recorded as active. Never restarts a running nginx
  * and never touches an unverified one.
  *
  * @param options - Manifest with `hostnames` settings, router settings, host and progress writer.
