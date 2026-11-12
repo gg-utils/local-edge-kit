@@ -139,14 +139,17 @@ the new hash. If the reload or start fails or is not confirmed, the previous con
 back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
 and nothing is recorded as active, so the next `up` tries again. Each rollback step (stop, record
 not active, restore or remove the config) runs even when an earlier one failed, and the failures are
-listed in the failed result's `errors`. If nginx confirmed the new config but its state file cannot
+listed in the failed result's `errors`; a host call that throws while the config may already be
+replaced (clearing the old marker socket, polling the marker, reading the new pid) is rolled back the
+same way and listed there too, so `up` returns a result instead of throwing. If nginx confirmed the new config but its state file cannot
 be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
 place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
 is an `nginx: master process` of our user whose single `-c` value is the same file as this config
 after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
 other process there is `unverified` and is never signalled or replaced. `down` sends SIGQUIT, checking the
-identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+identity again right before the signal; if nginx quit but its state file cannot be removed, `down` still
+returns `ok: true` (action `stopped`) with the error in `errors`, and the next `up` starts nginx normally. `status` adds a `router` row with the nginx pid and the
 Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
 is never changed by the supervisor.
 
