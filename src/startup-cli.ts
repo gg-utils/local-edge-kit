@@ -35,6 +35,7 @@ import type {
   LocalEdgeKit_StartupConfig,
 } from "./config.js";
 import { LocalEdgeKit_resolveProjectRoot } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 
 /** Minimal output sink used by tests and CLI adapters. */
 export type LocalEdgeKit_StartupCliOutput = {
@@ -229,7 +230,7 @@ export function LocalEdgeKit_runStartupCliCommand(
 
   if (args[0] !== "run") {
     output.error(
-      `[local-edge:startup-cli] Expected 'run <command>', got: ${args[0] ?? ""}`,
+      `[local-edge:startup-cli] Expected 'run <command>', got: ${LocalEdgeKit_messageWord(args[0] ?? "")}`,
     );
     LocalEdgeKit_printStartupUsage({ config: options.config, output });
     return LOCAL_EDGE_STARTUP_EXIT_CODES.usageError;

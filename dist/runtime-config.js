@@ -72,10 +72,10 @@ function LocalEdgeKit_resolvePrimaryMethod(options) {
         method: candidate,
         supportedMethods: options.supportedMethods,
     })) {
-        throw new Error(`[local-edge:config] ${options.primaryMethodEnvName}='${candidate}' is unsupported. Allowed value: ${options.supportedMethods.join(", ")}.`);
+        throw new Error(`[local-edge:config] ${options.primaryMethodEnvName} is not a supported method. Allowed value: ${options.supportedMethods.join(", ")}.`);
     }
     if (!options.configuredMethods.includes(candidate)) {
-        throw new Error(`[local-edge:config] ${options.primaryMethodEnvName}='${candidate}' is not present in ${options.methodsEnvName}='${options.configuredMethods.join(",")}'.`);
+        throw new Error(`[local-edge:config] ${options.primaryMethodEnvName} is not one of the methods enabled by ${options.methodsEnvName}.`);
     }
     return candidate;
 }

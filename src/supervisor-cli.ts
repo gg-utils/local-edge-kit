@@ -29,6 +29,7 @@ import {
 } from "@gg-utils/local-edge-core/exposure";
 
 import { type LocalEdgeKit_ExtraAppsSource, LocalEdgeKit_mergeExtraApps } from "./extra-apps.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
 import {
   type LocalEdgeKit_SupervisorRouterConfig,
@@ -214,7 +215,7 @@ function LocalEdgeKit_selectIds(config: LocalEdgeKit_SupervisorConfig, positiona
   if (positionals.length > 0) {
     for (const id of positionals) {
       if (!config.apps.some((app) => app.id === id)) {
-        throw new Error(`unknown app "${id}"`);
+        throw new Error(`unknown app "${LocalEdgeKit_messageWord(id)}"`);
       }
     }
     return [...positionals];
@@ -455,7 +456,7 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
         return result.ok ? 0 : 1;
       }
       default:
-        stderr.write(`unknown command "${command}"\n${LocalEdgeKit_supervisorUsage(config)}`);
+        stderr.write(`unknown command "${LocalEdgeKit_messageWord(command)}"\n${LocalEdgeKit_supervisorUsage(config)}`);
         return 2;
     }
   } catch (error) {

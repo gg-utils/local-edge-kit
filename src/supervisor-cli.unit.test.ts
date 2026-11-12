@@ -122,3 +122,21 @@ void test("logs --follow hands the resolved log file to the follower", async () 
   assert.equal(code, 0);
   assert.equal(seen, "/w/auth/l:5");
 });
+
+void test("no echo: an unknown command or app named on the command line is repeated only when it is a short plain word", async () => {
+  const run = async (args: string[]): Promise<string> => {
+    const stderr = capture();
+    const code = await LocalEdgeKit_runSupervisorCli({ args, config, host: fakeHost(), stdout: capture().writer, stderr: stderr.writer });
+    assert.equal(code, 2);
+    return stderr.text();
+  };
+  assert.match(await run(["nope"]), /^unknown command "nope"\n/);
+  assert.match(await run(["health", "ghost"]), /^error: unknown app "ghost"\n$/);
+  for (const word of ["ECHOMARK7 token=x", `ECHOMARK7${"x".repeat(60)}`]) {
+    const command = await run([word]);
+    const app = await run(["health", word]);
+    assert.ok(!command.includes("ECHOMARK7") && !app.includes("ECHOMARK7"), `${command}${app}`);
+    assert.match(command, /^unknown command "<\d+ characters>"\n/);
+    assert.match(app, /^error: unknown app "<\d+ characters>"\n$/);
+  }
+});

@@ -14,6 +14,8 @@
  * @documentation reviewed=2026-05-23 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
+
 /** A selectable list option for classic interactive prompts. */
 export type LocalEdgeKit_InteractiveListOption<Value extends string = string> =
   {
@@ -202,7 +204,7 @@ export async function LocalEdgeKit_handleInteractiveActionMenuSelection<
 
   const item = findInteractiveMenuItem({ choice, sections: config.sections });
   if (item === null) {
-    session.printError(`Invalid choice: ${choice}`);
+    session.printError(`Invalid choice: ${LocalEdgeKit_messageWord(choice)}`);
     return "continue";
   }
 

@@ -15,6 +15,8 @@
 
 import path from "node:path";
 
+import { LocalEdgeKit_messageFlag, LocalEdgeKit_messageWord } from "./safe-message.js";
+
 /** Parsed result from a local-edge UI launcher argv slice. */
 export type LocalEdgeKit_UiLaunchParseResult<ActionId extends string> = {
   helpRequested: boolean;
@@ -58,7 +60,7 @@ export function LocalEdgeKit_parseUiLaunchArgv<ActionId extends string>(options:
           throw new Error(`${options.errorPrefix} ${arg} requires an action id.`);
         }
         if (!options.isActionId(next)) {
-          throw new Error(`${options.errorPrefix} Unknown action id: ${next}`);
+          throw new Error(`${options.errorPrefix} Unknown action id: ${LocalEdgeKit_messageWord(next)}`);
         }
         printCommandMode = arg === "--json-plan" ? "json" : "line";
         printCommandActionId = next;
@@ -66,7 +68,7 @@ export function LocalEdgeKit_parseUiLaunchArgv<ActionId extends string>(options:
         break;
       }
       default:
-        throw new Error(`${options.errorPrefix} Unknown option: ${arg}`);
+        throw new Error(`${options.errorPrefix} Unknown option: ${LocalEdgeKit_messageFlag(arg ?? "")}`);
     }
   }
 

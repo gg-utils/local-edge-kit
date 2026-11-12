@@ -1160,3 +1160,33 @@ void test("no echo: an unsupported start method is repeated only when it is a sh
   assert.equal(start("ECHOMARK7 token=x"), "[local-edge:start] Unsupported --method '<17 characters>'.\n");
   assert.equal(start(`ECHOMARK7${"x".repeat(60)}`), "[local-edge:start] Unsupported --method '<69 characters>'.\n");
 });
+
+void test("no echo: setup and ensure-running bound the requested method and never print the methods env value", () => {
+  const setup = (method: string): string => {
+    const result = LocalEdgeKit_resolveSetupRequest({
+      config: exampleConfig,
+      projectRoot: "/tmp/example",
+      env: { LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD: method, LOCAL_EDGE_METHODS: "nginx-docker" },
+    });
+    assert.equal(result.ok, false);
+    return result.ok ? "" : result.stderrLine;
+  };
+  const ensure = (method: string): string => {
+    const result = LocalEdgeKit_resolveEnsureRunningRequest({
+      config: exampleConfig,
+      projectRoot: "/tmp/example",
+      env: { LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD: method, LOCAL_EDGE_METHODS: "nginx-docker" },
+    });
+    assert.equal(result.ok, false);
+    return result.ok ? "" : result.stderrLine;
+  };
+  assert.equal(setup("bogus"), "[local-edge:setup] Requested method 'bogus' is not enabled by LOCAL_EDGE_METHODS.\n");
+  assert.equal(ensure("bogus"), "[local-edge:ensure-running] ERROR: Method 'bogus' is not enabled by LOCAL_EDGE_METHODS.\n");
+  for (const run of [setup, ensure]) {
+    const message = run("ECHOMARK7 token=x");
+    assert.ok(!message.includes("ECHOMARK7"), message);
+    assert.match(message, /'<17 characters>' is not enabled by LOCAL_EDGE_METHODS\.\n$/);
+    // The methods env value (here the one supported method) is not printed either.
+    assert.ok(!run("bogus").includes("nginx-docker"), "the methods env value must not be printed");
+  }
+});

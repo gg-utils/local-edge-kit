@@ -13,6 +13,7 @@
  * @documentation reviewed=2026-05-23 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import path from "node:path";
+import { LocalEdgeKit_messageFlag, LocalEdgeKit_messageWord } from "./safe-message.js";
 /** Parses local-edge UI launcher argv with a project-supplied action-id guard. */
 export function LocalEdgeKit_parseUiLaunchArgv(options) {
     let helpRequested = false;
@@ -41,7 +42,7 @@ export function LocalEdgeKit_parseUiLaunchArgv(options) {
                     throw new Error(`${options.errorPrefix} ${arg} requires an action id.`);
                 }
                 if (!options.isActionId(next)) {
-                    throw new Error(`${options.errorPrefix} Unknown action id: ${next}`);
+                    throw new Error(`${options.errorPrefix} Unknown action id: ${LocalEdgeKit_messageWord(next)}`);
                 }
                 printCommandMode = arg === "--json-plan" ? "json" : "line";
                 printCommandActionId = next;
@@ -49,7 +50,7 @@ export function LocalEdgeKit_parseUiLaunchArgv(options) {
                 break;
             }
             default:
-                throw new Error(`${options.errorPrefix} Unknown option: ${arg}`);
+                throw new Error(`${options.errorPrefix} Unknown option: ${LocalEdgeKit_messageFlag(arg ?? "")}`);
         }
     }
     return {

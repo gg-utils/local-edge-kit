@@ -96,21 +96,21 @@ function LocalEdgeKit_walkDirs(realRoot, relativeDir, dirMode) {
     }
     return chain;
 }
-/** Throws when any folder of the chain was replaced, removed or turned into a symlink. */
-function LocalEdgeKit_recheckChain(chain) {
+/** Throws `fail("changed", ...)` when any folder of the chain was replaced, removed or turned into a symlink. */
+function LocalEdgeKit_recheckChain(chain, fail = LocalEdgeKit_safeWriteError, during = "the write") {
     for (const entry of chain) {
         const stats = LocalEdgeKit_lstatOrNull(entry.dir);
         if (stats === null || stats.isSymbolicLink() || !stats.isDirectory() || stats.dev !== entry.dev || stats.ino !== entry.ino) {
-            throw LocalEdgeKit_safeWriteError("changed", `folder ${entry.dir} changed during the write`);
+            throw fail("changed", `folder ${entry.dir} changed during ${during}`);
         }
     }
 }
-/** Throws unless `fd` is the regular file currently at `filePath`. */
-function LocalEdgeKit_assertFdIsPath(fd, filePath) {
+/** Throws `fail("changed", ...)` unless `fd` is the regular file currently at `filePath`. */
+function LocalEdgeKit_assertFdIsPath(fd, filePath, fail = LocalEdgeKit_safeWriteError) {
     const opened = fstatSync(fd);
     const atPath = LocalEdgeKit_lstatOrNull(filePath);
     if (atPath === null || !opened.isFile() || !atPath.isFile() || opened.dev !== atPath.dev || opened.ino !== atPath.ino) {
-        throw LocalEdgeKit_safeWriteError("changed", `${filePath} changed while it was opened`);
+        throw fail("changed", `${filePath} changed while it was opened`);
     }
 }
 function LocalEdgeKit_checkTarget(filePath, options) {
@@ -193,6 +193,18 @@ function LocalEdgeKit_assertPrivateFile(stats, filePath, uid) {
         throw LocalEdgeKit_safeReadError("unsafe-mode", `${filePath} is writable by group or others (mode ${(stats.mode & 0o777).toString(8)}); use 0600`);
     }
 }
+/** Opens `filePath` for reading; a symlink swapped in after the checks is the named `symlink` error, not a raw `ELOOP`. */
+function LocalEdgeKit_openForRead(filePath) {
+    try {
+        return openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    }
+    catch (error) {
+        if (error.code === "ELOOP") {
+            throw LocalEdgeKit_safeReadError("symlink", `refusing to read through symlink ${filePath}`);
+        }
+        throw error;
+    }
+}
 /** Reads at most `maxBytes` from `fd`; throws when the file turns out to be longer. */
 function LocalEdgeKit_readBounded(fd, filePath, maxBytes) {
     const buffer = Buffer.allocUnsafe(maxBytes + 1);
@@ -222,10 +234,12 @@ function LocalEdgeKit_readBounded(fd, filePath, maxBytes) {
  * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
  * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
- * (`outside-root`), is a symlink or not a regular file (`symlink`, `not-file`), a folder on the way
- * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the file
- * or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
- * (`unsafe-owner`), or the file is over the size limit (`too-large`).
+ * (`outside-root`), is a symlink, also one swapped in just before the open (`symlink`), or not a
+ * regular file (`not-file`), the root or a folder on the way is not a folder (`not-a-folder`) or
+ * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the
+ * file or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
+ * (`unsafe-owner`), or the file is over the size limit (`too-large`). Any other operating-system
+ * error (for example `EACCES`) passes through as it is; it names the path, never the content.
  * @example
  * ```typescript
  * // The folder should be 0700 and the file 0600.
@@ -268,19 +282,14 @@ export function LocalEdgeKit_readFileSafe(filePath, options) {
     }
     options.hooks?.beforeOpen?.();
     // O_NONBLOCK: a FIFO swapped in after the checks above must not block the open.
-    const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const fd = LocalEdgeKit_openForRead(resolved);
     try {
         const opened = fstatSync(fd);
         if (!opened.isFile()) {
             throw LocalEdgeKit_safeReadError("not-file", `${resolved} is not a regular file`);
         }
-        try {
-            LocalEdgeKit_recheckChain(chain);
-            LocalEdgeKit_assertFdIsPath(fd, resolved);
-        }
-        catch (error) {
-            throw LocalEdgeKit_safeReadError("changed", error.message);
-        }
+        LocalEdgeKit_recheckChain(chain, LocalEdgeKit_safeReadError, "the read");
+        LocalEdgeKit_assertFdIsPath(fd, resolved, LocalEdgeKit_safeReadError);
         const folder = chain[chain.length - 1];
         if (folder !== undefined) {
             LocalEdgeKit_assertPrivateFolder(folder, folderUid);

@@ -202,3 +202,16 @@ void test("local-edge UI spawn planner rejects missing pool-next stack", () => {
     /stack name/,
   );
 });
+
+void test("no echo: an unknown action id is repeated only when it is a short plain word", () => {
+  const message = (actionId: string): string => {
+    try {
+      LocalEdgeKit_buildUiSpawnRequest({ actionId: actionId as ActionId, config: CONFIG, resolveOptions: DEFAULT_OPTIONS });
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return assert.fail("expected a throw");
+  };
+  assert.equal(message("nope"), "Unknown local-edge UI action: nope");
+  assert.equal(message("ECHOMARK7 token=x"), "Unknown local-edge UI action: <17 characters>");
+});

@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import { LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND, LOCAL_EDGE_CORE_HOSTNAMES_BACKEND, LocalEdgeCore_createExposureBackend, LocalEdgeCore_observeHostnamesServeTcp, LocalEdgeCore_resolveExposureBackendName, LocalEdgeCore_renderExposurePlanText, } from "@gg-utils/local-edge-core/exposure";
 import { LocalEdgeKit_mergeExtraApps } from "./extra-apps.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
 import { LOCAL_EDGE_KIT_ROUTER_ID, LocalEdgeKit_inspectRouter, LocalEdgeKit_routerDown, LocalEdgeKit_routerUp, } from "./supervisor-router.js";
 import { LocalEdgeKit_createSupervisorHost, LocalEdgeKit_inspectSupervisedApp, LocalEdgeKit_probeSupervisedAppHealth, LocalEdgeKit_resolveAppPath, LocalEdgeKit_supervisorDown, LocalEdgeKit_supervisorUp, LocalEdgeKit_validateSupervisedApps, } from "./supervisor.js";
@@ -131,7 +132,7 @@ function LocalEdgeKit_selectIds(config, positionals) {
     if (positionals.length > 0) {
         for (const id of positionals) {
             if (!config.apps.some((app) => app.id === id)) {
-                throw new Error(`unknown app "${id}"`);
+                throw new Error(`unknown app "${LocalEdgeKit_messageWord(id)}"`);
             }
         }
         return [...positionals];
@@ -334,7 +335,7 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                 return result.ok ? 0 : 1;
             }
             default:
-                stderr.write(`unknown command "${command}"\n${LocalEdgeKit_supervisorUsage(config)}`);
+                stderr.write(`unknown command "${LocalEdgeKit_messageWord(command)}"\n${LocalEdgeKit_supervisorUsage(config)}`);
                 return 2;
         }
     }

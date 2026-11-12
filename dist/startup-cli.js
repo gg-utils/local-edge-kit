@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { LOCAL_EDGE_STARTUP_EXIT_CODES, LocalEdgeStartupCli_buildImplSpawnPlan, LocalEdgeStartupCli_renderUsage, LocalEdgeStartupCli_resolveImplBaseName, LocalEdgeStartupCliParseError, LocalEdgeStartupCli_parseCommand, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_resolveProjectRoot } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 function LocalEdgeKit_defaultStartupCliOutput() {
     return {
         error(message) {
@@ -127,7 +128,7 @@ export function LocalEdgeKit_runStartupCliCommand(options) {
             : LOCAL_EDGE_STARTUP_EXIT_CODES.success;
     }
     if (args[0] !== "run") {
-        output.error(`[local-edge:startup-cli] Expected 'run <command>', got: ${args[0] ?? ""}`);
+        output.error(`[local-edge:startup-cli] Expected 'run <command>', got: ${LocalEdgeKit_messageWord(args[0] ?? "")}`);
         LocalEdgeKit_printStartupUsage({ config: options.config, output });
         return LOCAL_EDGE_STARTUP_EXIT_CODES.usageError;
     }

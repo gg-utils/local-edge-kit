@@ -230,3 +230,23 @@ void test("LocalEdgeKit_handleInteractiveActionMenuSelection dispatches configur
   assert.ok(state.lines.includes("note:mode:recent"));
   assert.ok(state.lines.includes("success:bye"));
 });
+
+void test("no echo: an invalid typed choice is repeated only when it is a short plain word", async () => {
+  const invalid = async (choice: string): Promise<string> => {
+    const state: FakeSessionState = { chosenScopes: [], lines: [], requiredAnswers: [], yesNoAnswers: [] };
+    const result = await LocalEdgeKit_handleInteractiveActionMenuSelection({
+      choice,
+      config: createConfig(),
+      dependencies: {
+        session: createFakeSession(state),
+        resolveLogCommand: () => ({ note: "n", scriptName: "s" }),
+        runScript: () => Promise.resolve(),
+      },
+    });
+    assert.equal(result, "continue");
+    return state.lines.join("\n");
+  };
+  assert.equal(await invalid("zz"), "error:Invalid choice: zz");
+  assert.equal(await invalid("ECHOMARK7 token=x"), "error:Invalid choice: <17 characters>");
+  assert.equal(await invalid(`ECHOMARK7${"x".repeat(60)}`), "error:Invalid choice: <69 characters>");
+});

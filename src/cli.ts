@@ -18,6 +18,7 @@ import type { LocalEdgeKit_Config } from "./config.js";
 import { LocalEdgeKit_runDnsAuditCommand } from "./dns-audit-cli.js";
 import { LocalEdgeKit_runHealthcheckCommand } from "./healthcheck-cli.js";
 import { LocalEdgeKit_runStatusCommand } from "./status-cli.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_runUrlsCommand } from "./urls-cli.js";
 
 /** Options for invoking the reusable kit dispatcher. */
@@ -81,7 +82,7 @@ export async function LocalEdgeKit_runCli(
       });
     }
 
-    console.error(`[local-edge-kit:error] Unknown command: ${command}`);
+    console.error(`[local-edge-kit:error] Unknown command: ${LocalEdgeKit_messageWord(command)}`);
     return 2;
   } catch (error: unknown) {
     console.error(error instanceof Error ? error.message : String(error));

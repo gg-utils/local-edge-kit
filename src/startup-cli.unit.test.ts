@@ -161,3 +161,20 @@ void test("LocalEdgeKit_runStartupCliCommand returns usage errors without spawni
   assert.equal(exitCode, 2);
   assert.deepEqual(errors, ["[local-edge:start] Unknown option: --unknown"]);
 });
+
+void test("no echo: a first word other than run is repeated only when it is a short plain word", () => {
+  const errors: string[] = [];
+  for (const word of ["bogus", "ECHOMARK7 token=x"]) {
+    const exitCode = LocalEdgeKit_runStartupCliCommand({
+      args: [word],
+      config: createStartupConfig(),
+      env: { LOCAL_EDGE_PROJECT_ROOT: "/tmp/example-project" },
+      output: { error: (message) => errors.push(message), log: () => undefined },
+    });
+    assert.notEqual(exitCode, 0);
+  }
+  assert.deepEqual(errors, [
+    "[local-edge:startup-cli] Expected 'run <command>', got: bogus",
+    "[local-edge:startup-cli] Expected 'run <command>', got: <17 characters>",
+  ]);
+});

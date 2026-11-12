@@ -16,6 +16,7 @@
 import { LocalEdgeKit_runDnsAuditCommand } from "./dns-audit-cli.js";
 import { LocalEdgeKit_runHealthcheckCommand } from "./healthcheck-cli.js";
 import { LocalEdgeKit_runStatusCommand } from "./status-cli.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_runUrlsCommand } from "./urls-cli.js";
 function LocalEdgeKit_usage(config) {
     return `Usage: ${config.cli?.commandName ?? "local-edge"} <dns-audit|healthcheck|status|urls> [args]`;
@@ -62,7 +63,7 @@ export async function LocalEdgeKit_runCli(options) {
                 env: options.env,
             });
         }
-        console.error(`[local-edge-kit:error] Unknown command: ${command}`);
+        console.error(`[local-edge-kit:error] Unknown command: ${LocalEdgeKit_messageWord(command)}`);
         return 2;
     }
     catch (error) {

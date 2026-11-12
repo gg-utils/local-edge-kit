@@ -12,6 +12,7 @@
  * @see local-edge-ui.config.ts - Repository-root adapter that binds consumer npm script names and bash helper paths into LocalEdgeKit_UiSpawnRequestConfig shapes consumed through @gg-utils/local-edge-kit.
  * @documentation reviewed=2026-05-23 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 /** Creates a fresh default resolve-options object for local-edge action browsers. */
 export function LocalEdgeKit_createDefaultUiResolveOptions(options) {
     return {
@@ -37,7 +38,7 @@ export function LocalEdgeKit_createDefaultUiResolveOptions(options) {
 export function LocalEdgeKit_buildUiSpawnRequest(options) {
     const action = options.config.getActionById(options.actionId);
     if (!action) {
-        throw new Error(`Unknown local-edge UI action: ${options.actionId}`);
+        throw new Error(`Unknown local-edge UI action: ${LocalEdgeKit_messageWord(options.actionId)}`);
     }
     const descriptor = options.config.actionDescriptors[options.actionId];
     if (!descriptor) {

@@ -922,8 +922,25 @@ void test("LocalEdgeKit_applyRuntimeLaunchHostOverridePhase mutates configured e
 
   assert.equal(env.HOST, "0.0.0.0");
   assert.deepEqual(logLines, [
-    "[local] Overriding HOST for web dev server: '127.0.0.1' -> '0.0.0.0'.",
+    "[local] Overriding HOST for web dev server from WEB_LISTEN_HOST or its default.",
   ]);
+});
+
+void test("no echo: the host-override log line names the variables and never prints a value", () => {
+  const plan = LocalEdgeKit_buildRuntimeLaunchHostOverridePlan({
+    config: runtimeLaunchConfig,
+    env: {
+      HOST: "ECHOMARK-PRIOR.example.test",
+      WEB_LISTEN_HOST: "ECHOMARK-NEW.example.test",
+    },
+  });
+
+  assert.equal(plan.value, "ECHOMARK-NEW.example.test");
+  assert.ok(plan.logLine !== null);
+  assert.ok(plan.logLine.includes("HOST"));
+  assert.ok(plan.logLine.includes("WEB_LISTEN_HOST"));
+  assert.equal(plan.logLine.includes("ECHOMARK"), false);
+  assert.equal(plan.logLine.includes("'"), false);
 });
 
 void test("LocalEdgeKit_runRuntimeLaunchDependencyCheckPhase returns report exit code", () => {
@@ -1471,7 +1488,7 @@ void test("LocalEdgeKit_buildRuntimeLaunchHostOverridePlan builds process env ov
   assert.deepEqual(plan, {
     envName: "HOST",
     logLine:
-      "[local] Overriding HOST for web dev server: '127.0.0.1' -> '0.0.0.0'.",
+      "[local] Overriding HOST for web dev server from WEB_LISTEN_HOST or its default.",
     value: "0.0.0.0",
   });
 });

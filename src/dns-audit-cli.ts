@@ -55,6 +55,17 @@ import type {
   LocalEdgeKit_SurfaceConfig,
 } from "./config.js";
 import { LocalEdgeKit_loadActiveEnvFileStack } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
+
+/**
+ * Bounds one value of a `detail` line, expected or actual. An empty value stays empty (it means
+ * "nothing found"); anything else goes through `LocalEdgeKit_messageWord`, so a long or odd value
+ * shows as `<N characters>`. The actual values come from the system resolver file and DNS answers,
+ * which this kit does not control.
+ */
+function LocalEdgeKit_dnsAuditDetailValue(value: string): string {
+  return value === "" ? "" : LocalEdgeKit_messageWord(value);
+}
 import {
   LocalEdgeKit_getRuntimeMethod,
   LocalEdgeKit_resolveRuntimeConfig,
@@ -348,7 +359,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options: {
 }): LocalEdgeKit_DnsAuditRealmRecord {
   if (!LocalEdgeKit_isRecord(options.value)) {
     throw new Error(
-      `[local-edge:dns-audit] Registry realm '${options.realmSlug}' must be an object.`,
+      `[local-edge:dns-audit] Registry realm '${LocalEdgeKit_messageWord(options.realmSlug)}' must be an object.`,
     );
   }
 
@@ -359,7 +370,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options: {
   });
   if (realmSlug !== options.realmSlug) {
     throw new Error(
-      `[local-edge:dns-audit] Registry realm key '${options.realmSlug}' does not match realmSlug '${realmSlug}'.`,
+      `[local-edge:dns-audit] Registry realm key '${LocalEdgeKit_messageWord(options.realmSlug)}' does not match its realmSlug field.`,
     );
   }
 
@@ -534,13 +545,13 @@ async function LocalEdgeKit_checkResolverFile(options: {
       output: options.output,
       state: options.state,
       label: "resolver.nameserver",
-      detail: `expected='${options.expectedNameserver}' actual=''`,
+      detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedNameserver)}' actual=''`,
     });
     LocalEdgeKit_recordDnsAuditFail({
       output: options.output,
       state: options.state,
       label: "resolver.port",
-      detail: `expected='${options.expectedPort}' actual=''`,
+      detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedPort)}' actual=''`,
     });
     return;
   }
@@ -560,7 +571,7 @@ async function LocalEdgeKit_checkResolverFile(options: {
       output: options.output,
       state: options.state,
       label: "resolver.nameserver",
-      detail: `expected='${options.expectedNameserver}' actual='${resolverNameserver}'`,
+      detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedNameserver)}' actual='${LocalEdgeKit_dnsAuditDetailValue(resolverNameserver)}'`,
     });
   }
 
@@ -575,7 +586,7 @@ async function LocalEdgeKit_checkResolverFile(options: {
       output: options.output,
       state: options.state,
       label: "resolver.port",
-      detail: `expected='${options.expectedPort}' actual='${resolverPort}'`,
+      detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedPort)}' actual='${LocalEdgeKit_dnsAuditDetailValue(resolverPort)}'`,
     });
   }
 }
@@ -611,7 +622,7 @@ async function LocalEdgeKit_checkRealmSurfaces(options: {
         output: options.output,
         state: options.state,
         label: systemLabel,
-        detail: `host='${target.expectedHost}' expected='${expectedIp}' actual='${systemResolvedIp ?? ""}'`,
+        detail: `host='${target.expectedHost}' expected='${LocalEdgeKit_dnsAuditDetailValue(expectedIp)}' actual='${LocalEdgeKit_dnsAuditDetailValue(systemResolvedIp ?? "")}'`,
       });
     }
 
@@ -635,7 +646,7 @@ async function LocalEdgeKit_checkRealmSurfaces(options: {
           output: options.output,
           state: options.state,
           label: directLabel,
-          detail: `host='${target.expectedHost}' expected='${expectedIp}' actual='${directResolvedIp ?? ""}'`,
+          detail: `host='${target.expectedHost}' expected='${LocalEdgeKit_dnsAuditDetailValue(expectedIp)}' actual='${LocalEdgeKit_dnsAuditDetailValue(directResolvedIp ?? "")}'`,
         });
       }
     }

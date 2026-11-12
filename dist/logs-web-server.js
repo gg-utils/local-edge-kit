@@ -322,8 +322,10 @@ function LocalEdgeKit_searchLogsWeb(options) {
     try {
         regex = new RegExp(options.query, "i");
     }
-    catch (error) {
-        options.stderr(`[${options.surfaceId}] Invalid search regex '${options.query}': ${LocalEdgeKit_errorMessage(error)}`);
+    catch {
+        // The pattern comes from the browser and the engine's message embeds all of it, so the server
+        // log gets fixed text and a length: no line breaks, escapes or unbounded text can reach it.
+        options.stderr(`[${options.surfaceId}] Invalid search pattern (${String(options.query.length)} characters)`);
         LocalEdgeKit_sendLogsWebMessage(options.client.ws, {
             matches: [],
             total: 0,

@@ -23,6 +23,7 @@ import https from "node:https";
 import path from "node:path";
 import { LocalEdgeCore_buildHealthcheckRequestPath, LocalEdgeCore_buildHostnameFromParts, LocalEdgeCore_classifyHealthcheckErrorDomain, LocalEdgeCore_computeHealthFingerprint, LocalEdgeCore_computeHealthProbeRollups, LocalEdgeCore_formatHttpsUrl, LocalEdgeCore_healthProbeKey, LocalEdgeCore_isHealthyHttpStatusCode, LocalEdgeCore_parseHealthcheckRuntimeOptions, LocalEdgeCore_parseRequiredPositiveInt, LocalEdgeCore_resolveRealmArtifactPaths, LocalEdgeCore_shouldFailStrictHealthWatch, LocalEdgeCore_shouldLogHealthSummary, LocalEdgeCore_tickHealthFingerprintStability, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_loadActiveEnvFileStack } from "./env.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_getRuntimeMethod, LocalEdgeKit_resolveRuntimeConfig, } from "./runtime-config.js";
 const LOCAL_EDGE_KIT_HEALTHCHECK_DEFAULT_INTERVAL_MS = 5000;
 const LOCAL_EDGE_KIT_HEALTHCHECK_DEFAULT_STEADY_INTERVAL_MS = 15000;
@@ -103,7 +104,7 @@ function LocalEdgeKit_realmRootFromRecord(record) {
 }
 function LocalEdgeKit_readRegistryRealmRecord(options) {
     if (!LocalEdgeKit_isRecord(options.value)) {
-        throw new Error(`[local-edge:healthcheck] Registry realm '${options.realmSlug}' must be an object.`);
+        throw new Error(`[local-edge:healthcheck] Registry realm '${LocalEdgeKit_messageWord(options.realmSlug)}' must be an object.`);
     }
     const realmSlug = LocalEdgeKit_stringFromRecord({
         record: options.value,
@@ -111,7 +112,7 @@ function LocalEdgeKit_readRegistryRealmRecord(options) {
         fallback: options.realmSlug,
     });
     if (realmSlug !== options.realmSlug) {
-        throw new Error(`[local-edge:healthcheck] Registry realm key '${options.realmSlug}' does not match realmSlug '${realmSlug}'.`);
+        throw new Error(`[local-edge:healthcheck] Registry realm key '${LocalEdgeKit_messageWord(options.realmSlug)}' does not match its realmSlug field.`);
     }
     return {
         realmSlug,

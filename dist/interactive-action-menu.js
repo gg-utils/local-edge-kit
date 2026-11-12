@@ -13,6 +13,7 @@
  * @see local-edge-interactive.config.ts - Root menu config typing the sections and log-scope options this runner consumes for local-edge interactive flows.
  * @documentation reviewed=2026-05-23 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 /** Prints all configured sections into the supplied interactive session. */
 export function LocalEdgeKit_printInteractiveActionMenu(options) {
     const { config, session } = options;
@@ -45,7 +46,7 @@ export async function LocalEdgeKit_handleInteractiveActionMenuSelection(options)
     }
     const item = findInteractiveMenuItem({ choice, sections: config.sections });
     if (item === null) {
-        session.printError(`Invalid choice: ${choice}`);
+        session.printError(`Invalid choice: ${LocalEdgeKit_messageWord(choice)}`);
         return "continue";
     }
     const action = item.action;

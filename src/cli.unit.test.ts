@@ -97,3 +97,19 @@ void test("LocalEdgeKit_runCli rejects unknown commands", async () => {
     console.error = originalError;
   }
 });
+
+void test("no echo: an unknown command is repeated only when it is a short plain word", async () => {
+  const originalError = console.error;
+  const output: string[] = [];
+  console.error = (message?: unknown): void => {
+    output.push(typeof message === "string" ? message : "");
+  };
+  try {
+    for (const command of ["missing-command", "ECHOMARK7 token=x"]) {
+      assert.equal(await LocalEdgeKit_runCli({ args: [command], config: createTestConfig(), env: {} }), 2);
+    }
+  } finally {
+    console.error = originalError;
+  }
+  assert.deepEqual(output, ["[local-edge-kit:error] Unknown command: missing-command", "[local-edge-kit:error] Unknown command: <17 characters>"]);
+});

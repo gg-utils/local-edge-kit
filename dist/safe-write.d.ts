@@ -91,10 +91,12 @@ export type LocalEdgeKit_SafeWriteOptions = {
  * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
  * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
- * (`outside-root`), is a symlink or not a regular file (`symlink`, `not-file`), a folder on the way
- * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the file
- * or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
- * (`unsafe-owner`), or the file is over the size limit (`too-large`).
+ * (`outside-root`), is a symlink, also one swapped in just before the open (`symlink`), or not a
+ * regular file (`not-file`), the root or a folder on the way is not a folder (`not-a-folder`) or
+ * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the
+ * file or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
+ * (`unsafe-owner`), or the file is over the size limit (`too-large`). Any other operating-system
+ * error (for example `EACCES`) passes through as it is; it names the path, never the content.
  * @example
  * ```typescript
  * // The folder should be 0700 and the file 0600.

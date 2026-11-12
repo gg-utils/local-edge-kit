@@ -11,7 +11,7 @@ import { LocalEdgeKit_commandRuntimeValidateRequestedMethod } from "./command-ru
 import { defineLocalEdgeConfig } from "./config.js";
 import { LocalEdgeKit_parseHelperServerPort } from "./helper-server-config.js";
 import { LocalEdgeKit_resolveRuntimeConfig } from "./runtime-config.js";
-import { LocalEdgeKit_messageEnvNames, LocalEdgeKit_messageWord } from "./safe-message.js";
+import { LocalEdgeKit_messageEnvNames, LocalEdgeKit_messageFlag, LocalEdgeKit_messageWord } from "./safe-message.js";
 
 const MARKER = "ECHOMARK7";
 
@@ -102,7 +102,7 @@ void test("no echo: legacy env key names are capped at five and shape-checked", 
   );
   assert.ok(!message.includes(MARKER), message);
   assert.ok(!message.includes("value"), message);
-  assert.match(message, /Remove: <\d+ characters>, LOCAL_EDGE_MACOS_A, LOCAL_EDGE_MACOS_B, LOCAL_EDGE_MACOS_C, LOCAL_EDGE_MACOS_D \(and 2 more\)\.$/);
+  assert.match(message, /Remove: <\d+ characters>,LOCAL_EDGE_MACOS_A,LOCAL_EDGE_MACOS_B,LOCAL_EDGE_MACOS_C,LOCAL_EDGE_MACOS_D \(and 2 more\)\.$/);
 });
 
 void test("no echo: a requested --method is repeated only when it is a short plain word", () => {
@@ -126,8 +126,34 @@ void test("message helpers: words are bounded, env names are shape-checked and c
   assert.equal(LocalEdgeKit_messageWord("x".repeat(49)), "<49 characters>");
   assert.equal(LocalEdgeKit_messageWord("a b"), "<3 characters>");
   assert.equal(LocalEdgeKit_messageWord(""), "<0 characters>");
-  assert.equal(LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]), "A_KEY, B_KEY");
+  assert.equal(LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]), "A_KEY,B_KEY");
   assert.equal(LocalEdgeKit_messageEnvNames(["bad name"]), "<8 characters>");
   assert.equal(LocalEdgeKit_messageEnvNames([`A${"B".repeat(64)}`]), "<65 characters>");
-  assert.equal(LocalEdgeKit_messageEnvNames(["A", "B", "C", "D", "E", "F", "G"]), "A, B, C, D, E (and 2 more)");
+  assert.equal(LocalEdgeKit_messageEnvNames(["A", "B", "C", "D", "E", "F", "G"]), "A,B,C,D,E (and 2 more)");
+});
+
+void test("no echo: a primary method from env is never repeated, only the variable names", () => {
+  const resolve = (env: NodeJS.ProcessEnv, singleMethodMode = false): string =>
+    SafeMessageTest_thrown(() =>
+      LocalEdgeKit_resolveRuntimeConfig({ config: SafeMessageTest_config(singleMethodMode), env, projectRoot: "/tmp/example-project" }),
+    );
+  const unsupported = resolve({ LOCAL_EDGE_METHODS: "nginx-docker", LOCAL_EDGE_PRIMARY_METHOD: `${MARKER} token` });
+  assert.equal(unsupported, "[local-edge:config] LOCAL_EDGE_PRIMARY_METHOD is not a supported method. Allowed value: nginx-docker, nginx-docker-b.");
+  const absent = resolve({ LOCAL_EDGE_METHODS: "nginx-docker", LOCAL_EDGE_PRIMARY_METHOD: "nginx-docker-b" });
+  assert.equal(absent, "[local-edge:config] LOCAL_EDGE_PRIMARY_METHOD is not one of the methods enabled by LOCAL_EDGE_METHODS.");
+  assert.ok(!absent.includes("nginx-docker-b") && !absent.includes("='"), absent);
+});
+
+void test("wording matches core 0.4.1: <1 character> in the singular, env names joined with a bare comma", () => {
+  assert.equal(LocalEdgeKit_messageWord(""), "<0 characters>");
+  assert.equal(LocalEdgeKit_messageWord("-"), "<1 character>");
+  assert.equal(LocalEdgeKit_messageWord(" "), "<1 character>");
+  assert.equal(LocalEdgeKit_messageWord("  "), "<2 characters>");
+  assert.equal(LocalEdgeKit_messageFlag("--hlep"), "--hlep");
+  assert.equal(LocalEdgeKit_messageFlag("-x"), "-x");
+  assert.equal(LocalEdgeKit_messageFlag("--a b"), "--<3 characters>");
+  assert.equal(LocalEdgeKit_messageFlag("---x"), "--<2 characters>");
+  assert.equal(LocalEdgeKit_messageEnvNames(["a"]), "<1 character>");
+  assert.equal(LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY", "C_KEY"]), "A_KEY,B_KEY,C_KEY");
+  assert.equal(LocalEdgeKit_messageEnvNames(["A", "B", "C", "D", "E", "F"]), "A,B,C,D,E (and 1 more)");
 });
