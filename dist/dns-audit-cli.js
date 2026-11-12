@@ -36,6 +36,15 @@ import { promisify } from "node:util";
 import { LocalEdgeCore_buildHostnameFromParts, LocalEdgeCore_createDnsAuditState, LocalEdgeCore_formatDnsAuditPassLine, LocalEdgeCore_formatDnsAuditSummaryLine, LocalEdgeCore_formatDnsAuditWarningLine, LocalEdgeCore_parseDnsAuditCliArgs, LocalEdgeCore_parseMacosResolverContent, LocalEdgeCore_recordDnsAuditFailure, LocalEdgeCore_recordDnsAuditPass, LocalEdgeCore_renderDnsAuditArtifact, LocalEdgeCore_resolveMacosResolverPath, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_loadActiveEnvFileStack } from "./env.js";
 import { LocalEdgeKit_messageWord } from "./safe-message.js";
+/**
+ * Bounds one value of a `detail` line, expected or actual. An empty value stays empty (it means
+ * "nothing found"); anything else goes through `LocalEdgeKit_messageWord`, so a long or odd value
+ * shows as `<N characters>`. The actual values come from the system resolver file and DNS answers,
+ * which this kit does not control.
+ */
+function LocalEdgeKit_dnsAuditDetailValue(value) {
+    return value === "" ? "" : LocalEdgeKit_messageWord(value);
+}
 import { LocalEdgeKit_getRuntimeMethod, LocalEdgeKit_resolveRuntimeConfig, } from "./runtime-config.js";
 function LocalEdgeKit_defaultDnsAuditOutput() {
     return {
@@ -348,13 +357,13 @@ async function LocalEdgeKit_checkResolverFile(options) {
             output: options.output,
             state: options.state,
             label: "resolver.nameserver",
-            detail: `expected='${options.expectedNameserver}' actual=''`,
+            detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedNameserver)}' actual=''`,
         });
         LocalEdgeKit_recordDnsAuditFail({
             output: options.output,
             state: options.state,
             label: "resolver.port",
-            detail: `expected='${options.expectedPort}' actual=''`,
+            detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedPort)}' actual=''`,
         });
         return;
     }
@@ -373,7 +382,7 @@ async function LocalEdgeKit_checkResolverFile(options) {
             output: options.output,
             state: options.state,
             label: "resolver.nameserver",
-            detail: `expected='${options.expectedNameserver}' actual='${resolverNameserver}'`,
+            detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedNameserver)}' actual='${LocalEdgeKit_dnsAuditDetailValue(resolverNameserver)}'`,
         });
     }
     if (resolverPort === options.expectedPort) {
@@ -388,7 +397,7 @@ async function LocalEdgeKit_checkResolverFile(options) {
             output: options.output,
             state: options.state,
             label: "resolver.port",
-            detail: `expected='${options.expectedPort}' actual='${resolverPort}'`,
+            detail: `expected='${LocalEdgeKit_dnsAuditDetailValue(options.expectedPort)}' actual='${LocalEdgeKit_dnsAuditDetailValue(resolverPort)}'`,
         });
     }
 }
@@ -409,7 +418,7 @@ async function LocalEdgeKit_checkRealmSurfaces(options) {
                 output: options.output,
                 state: options.state,
                 label: systemLabel,
-                detail: `host='${target.expectedHost}' expected='${expectedIp}' actual='${systemResolvedIp ?? ""}'`,
+                detail: `host='${target.expectedHost}' expected='${LocalEdgeKit_dnsAuditDetailValue(expectedIp)}' actual='${LocalEdgeKit_dnsAuditDetailValue(systemResolvedIp ?? "")}'`,
             });
         }
         if (options.runDirectDnsProbe && options.directProbeAvailable) {
@@ -432,7 +441,7 @@ async function LocalEdgeKit_checkRealmSurfaces(options) {
                     output: options.output,
                     state: options.state,
                     label: directLabel,
-                    detail: `host='${target.expectedHost}' expected='${expectedIp}' actual='${directResolvedIp ?? ""}'`,
+                    detail: `host='${target.expectedHost}' expected='${LocalEdgeKit_dnsAuditDetailValue(expectedIp)}' actual='${LocalEdgeKit_dnsAuditDetailValue(directResolvedIp ?? "")}'`,
                 });
             }
         }

@@ -34,7 +34,21 @@ Follow-ups to 0.5.0 from review: the apps-file read reports its errors accuratel
 - **Wording matches core 0.4.1:** `<1 character>` in the singular and env names joined with `,`.
   Message texts changed accordingly. Core's helpers are not exported yet; when a core release
   exports them the kit can import them instead of its own copy.
-- **No behaviour change otherwise.** Which files are read or refused is unchanged.
+- **Three more messages no longer print a value.**
+  - The host-override log line (`runtime-launch`) names the two env variables and prints neither
+    the prior value nor the new one.
+  - The `dns-audit` detail lines still show what was expected and what was found, but both go
+    through the word helper, so a long or odd value (an env value, a resolver file line or a DNS
+    answer) shows as `<N characters>`. An empty value stays empty. A value that is not a short
+    plain token, such as an IPv6 address, also shows as its length.
+  - An invalid search pattern in the logs web server is logged as `Invalid search pattern (N
+    characters)`. The pattern and the engine's error text, which repeats all of it, are not logged.
+- **What is newly refused.** Nothing else about which files are read or refused changed. Three
+  things that 0.5.0 accepted are refused now, all in the extra-apps file or a custom source: an
+  app id longer than 63 characters in a file, a `host` in a file that is not a host name (letters,
+  digits, dots and dashes, at most 253 characters), and the reserved id `ROUTER.` (a trailing dot,
+  any case) from a custom source. The ownership and write-permission checks on the file and its
+  folder are unchanged.
 
 ## 0.5.0 - 2026-11-12
 

@@ -304,3 +304,68 @@ void test("no echo: registry file content (realm keys and realmSlug fields) is b
   const mismatch = await run({ main: { realmSlug: "ECHOMARK7 other" } });
   assert.equal(mismatch, "[local-edge:dns-audit] Registry realm key 'main' does not match its realmSlug field.");
 });
+
+void test("no echo: dns-audit detail lines bound both the expected values (env) and the actual values (resolver file, DNS answers)", async () => {
+  const run = async (options: {
+    readonly env: Record<string, string>;
+    readonly resolverFile: string;
+    readonly resolved: string;
+  }): Promise<string[]> => {
+    const { generatedDir, projectRoot, resolverDir } = await createTempRoot();
+    await fs.writeFile(path.join(resolverDir, "local.test"), options.resolverFile, "utf8");
+    await writeRegistry({ generatedDir, projectRoot });
+    const errors: string[] = [];
+    const exitCode = await LocalEdgeKit_runDnsAuditCommand({
+      args: ["--strict"],
+      config: createTestConfig({ resolverDir }),
+      env: {
+        LOCAL_EDGE_DEVELOPER_SLUG: "tester",
+        LOCAL_EDGE_ENV_FILE: path.join(projectRoot, ".env.local-edge"),
+        LOCAL_EDGE_ENV_SLUG: "main",
+        LOCAL_EDGE_GENERATED_DIR: generatedDir,
+        LOCAL_EDGE_PROJECT_ROOT: projectRoot,
+        LOCAL_EDGE_ROOT_ZONE: "local.test",
+        LOCAL_EDGE_SPLIT_DNS_NGINX_DOCKER_IP: "127.0.0.1",
+        USER: "tester",
+        ...options.env,
+      },
+      operations: {
+        readTextFile: (filePath) => fs.readFile(filePath, "utf8"),
+        isDnsListenerAvailable: () => Promise.resolve(true),
+        isDirectProbeUtilityAvailable: () => Promise.resolve(true),
+        resolveSystemHost: () => Promise.resolve(options.resolved),
+        resolveDirectHost: () => Promise.resolve(options.resolved),
+      },
+      output: { log: () => undefined, warn: () => undefined, error: (message) => errors.push(message) },
+    });
+    assert.notEqual(exitCode, 0);
+    return errors;
+  };
+
+  // Plain values keep their detail text.
+  const plain = await run({
+    env: { LOCAL_EDGE_SPLIT_DNS_LISTEN_ADDRESS: "127.0.0.1", LOCAL_EDGE_SPLIT_DNS_PORT: "53535" },
+    resolverFile: "nameserver 127.0.0.2\nport 5354\n",
+    resolved: "127.0.0.9",
+  });
+  assert.ok(plain.some((line) => line.includes("expected='127.0.0.1' actual='127.0.0.2'")));
+  assert.ok(plain.some((line) => line.includes("expected='53535' actual='5354'")));
+  assert.ok(plain.some((line) => line.includes("expected='127.0.0.1' actual='127.0.0.9'")));
+
+  // Long or odd values, on both sides, show as a length only.
+  const expectedOdd = "ECHOEXP\u001b[31m-listen-address-that-is-much-too-long-for-a-host-name-or-address";
+  const actualOdd = "ECHOACT\u001b[0m nameserver-that-is-much-too-long-for-a-host-name-or-address-at-all";
+  const odd = await run({
+    env: { LOCAL_EDGE_SPLIT_DNS_LISTEN_ADDRESS: expectedOdd, LOCAL_EDGE_SPLIT_DNS_PORT: "ECHOPORT 53535" },
+    resolverFile: `nameserver ${actualOdd}\nport ECHOPORTACT ${"9".repeat(80)}\n`,
+    resolved: actualOdd,
+  });
+  const text = odd.join("\n");
+  assert.equal(text.includes("ECHOEXP"), false);
+  assert.equal(text.includes("ECHOACT"), false);
+  assert.equal(text.includes("ECHOPORT"), false);
+  assert.equal(text.includes("\u001b"), false);
+  assert.ok(text.includes(`expected='<${String(expectedOdd.length)} characters>'`));
+  assert.ok(text.includes("expected='<14 characters>'"));
+  assert.ok(text.includes("actual='<"));
+});

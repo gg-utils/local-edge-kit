@@ -15,7 +15,8 @@
  */
 
 import assert from "node:assert/strict";
-import { once } from "node:events";
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter, once } from "node:events";
 import fs from "node:fs";
 import {
   createServer,
@@ -443,4 +444,76 @@ void test("LocalEdgeKit_startLogsWebServer binds a non-loopback host only when a
     statuses.push(response.status);
   }
   assert.deepEqual(statuses, [200, 200, 403, 403]);
+});
+
+void test("no echo: an invalid search pattern is logged as fixed text and a length, never the pattern or the engine message", async (t) => {
+  type Listener = (data: { toString: () => string }) => void;
+  const listeners: Listener[] = [];
+  const stderrLines: string[] = [];
+  const sent: string[] = [];
+  const fakeTail = Object.assign(new EventEmitter(), {
+    kill: () => true,
+    stderr: new EventEmitter(),
+    stdout: new EventEmitter(),
+  });
+  const handle = LocalEdgeKit_startLogsWebServer({
+    ...guardedLogsWebOptions,
+    bindHost: "127.0.0.1",
+    createWebSocketServer: () => ({
+      close: () => {},
+      onConnection: (listener) => {
+        listener({
+          onClose: () => {},
+          onMessage: (messageListener) => {
+            listeners.push(messageListener);
+          },
+          openState: 1,
+          readyState: 1,
+          send: (message) => {
+            sent.push(message);
+          },
+        });
+      },
+    }),
+    operations: {
+      clearInterval: () => {},
+      fileExists: () => true,
+      realpath: (filePath) => filePath,
+      setInterval: () => setTimeout(() => {}, 0),
+      spawnTail: () => fakeTail as unknown as ChildProcess,
+    },
+    stderr: (line) => {
+      stderrLines.push(line);
+    },
+  });
+  t.after(() => {
+    handle.close();
+  });
+  await once(handle.server, "listening");
+  const listener = listeners[0];
+  assert.ok(listener !== undefined);
+
+  const search = (query: string): string => {
+    stderrLines.length = 0;
+    listener({ toString: () => JSON.stringify({ query, type: "search" }) });
+    return stderrLines.join("\n");
+  };
+
+  // A short invalid pattern: fixed text and the length only.
+  const shortLine = search("(ECHOMARK1");
+  assert.equal(shortLine, "[logs-web] Invalid search pattern (10 characters)");
+
+  // A long pattern with a line break and a terminal escape: still one fixed line.
+  const longPattern = `(ECHOMARK2\n\u001b[31m${"a".repeat(5000)}`;
+  const longLine = search(longPattern);
+  assert.equal(longLine, `[logs-web] Invalid search pattern (${String(longPattern.length)} characters)`);
+  assert.equal(longLine.includes("\n"), false);
+  assert.equal(longLine.includes("\u001b"), false);
+  assert.equal(longLine.includes("Unterminated"), false);
+  assert.equal(longLine.includes("Invalid regular expression"), false);
+
+  // The client still gets the empty result and no text.
+  const last = sent[sent.length - 1];
+  assert.ok(last !== undefined);
+  assert.deepEqual(JSON.parse(last), { matches: [], total: 0, type: "searchResults" });
 });

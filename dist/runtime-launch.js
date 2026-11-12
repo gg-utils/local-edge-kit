@@ -1340,11 +1340,11 @@ export function LocalEdgeKit_buildRuntimeLaunchHostOverridePlan(options) {
             value: null,
         };
     }
-    const priorValue = options.env[hostOverride.targetEnvName] ?? "";
     const value = options.env[hostOverride.envName] ?? hostOverride.defaultValue;
     return {
         envName: hostOverride.targetEnvName,
-        logLine: `[local] Overriding ${hostOverride.targetEnvName} for ${hostOverride.logLabel}: '${priorValue || "<unset>"}' -> '${value}'.`,
+        // The line names the variables only: neither the prior value nor the new one is printed.
+        logLine: `[local] Overriding ${hostOverride.targetEnvName} for ${hostOverride.logLabel} from ${hostOverride.envName} or its default.`,
         value,
     };
 }
