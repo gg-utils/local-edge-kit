@@ -58,6 +58,10 @@ export function fakeHost(seed: {
   ) => { status: number | null; stdout: string; stderr: string } | undefined;
   /** Shares files and processes with other fake hosts, to model concurrent supervisors. */
   shared?: { files: Map<string, string>; processes: Map<number, FakeProcess & { alive: boolean }> };
+  /** Canonical paths the fake `realPath` returns; any other path is returned unchanged. */
+  realPaths?: Record<string, string>;
+  /** Answers `fetchUnixSocketText`; default null (no answer). */
+  fetchUnixSocket?: (socketPath: string, urlPath: string) => string | null;
   /** This supervisor's own pid. Default 1000. */
   ownPid?: number;
   /** Called after every read with the path and the text returned; used to interleave contenders. */
@@ -99,6 +103,8 @@ export function fakeHost(seed: {
       files.set(filePath, text);
       return true;
     },
+    realPath: (filePath) => seed.realPaths?.[filePath] ?? filePath,
+    fetchUnixSocketText: (socketPath, urlPath) => seed.fetchUnixSocket?.(socketPath, urlPath) ?? null,
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,

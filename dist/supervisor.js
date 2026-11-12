@@ -36,7 +36,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { LocalEdgeCore_isHealthyHttpStatusCode } from "@gg-utils/local-edge-core/healthcheck";
 import { LocalEdgeCore_runtimeStopParsePidLines, LocalEdgeCore_runtimeStopTerminatePidList, } from "@gg-utils/local-edge-core/runtime-stop";
@@ -45,6 +45,18 @@ import { LocalEdgeKit_createFileExclusive, LocalEdgeKit_ensureSafeDir, LocalEdge
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS = 60_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS = 10_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_POLL_MS = 500;
+/** Child script for `fetchUnixSocketText`: one GET over a unix socket, body on stdout, exit 0 on 200. */
+const LOCAL_EDGE_KIT_UNIX_SOCKET_FETCH_SCRIPT = [
+    'const http = require("node:http");',
+    "const [socketPath, urlPath, ms] = process.argv.slice(1);",
+    "const req = http.get({ socketPath, path: urlPath, timeout: Number(ms) }, (res) => {",
+    '  let body = ""; res.setEncoding("utf8");',
+    '  res.on("data", (c) => { body += c; if (body.length > 4096) req.destroy(); });',
+    '  res.on("end", () => { process.stdout.write(body); process.exit(res.statusCode === 200 ? 0 : 1); });',
+    "});",
+    'req.on("timeout", () => req.destroy());',
+    'req.on("error", () => process.exit(1));',
+].join("\n");
 function LocalEdgeKit_runCapture(command, args) {
     const result = spawnSync(command, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
     return { status: result.status, stdout: result.stdout ?? "" };
@@ -79,6 +91,22 @@ export function LocalEdgeKit_createSupervisorHost() {
         runCommand: (command, args) => {
             const result = spawnSync(command, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
             return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+        },
+        realPath: (filePath) => {
+            try {
+                return realpathSync(filePath);
+            }
+            catch {
+                return null;
+            }
+        },
+        fetchUnixSocketText: (socketPath, urlPath, timeoutMs) => {
+            const result = spawnSync(process.execPath, ["-e", LOCAL_EDGE_KIT_UNIX_SOCKET_FETCH_SCRIPT, socketPath, urlPath, String(timeoutMs)], {
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "ignore"],
+                timeout: timeoutMs + 2000,
+            });
+            return result.status === 0 ? (result.stdout ?? "") : null;
         },
         removeFile: (filePath) => rmSync(filePath, { force: true }),
         fileSize: (filePath) => (existsSync(filePath) ? statSync(filePath).size : 0),

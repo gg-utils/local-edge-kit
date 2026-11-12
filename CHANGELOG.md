@@ -18,3 +18,9 @@ Compatibility changes in the app supervisor:
   lock records the holder's pid, identity and a random token. A lock left by a process that is
   gone is taken over; a lock held by a live supervisor makes the second one fail. An empty or
   partial lock is never removed automatically: delete it by hand once no supervisor runs.
+- **The router is reloaded and stopped by signal.** With the `hostnames` backend, `up` reloads a
+  running nginx with SIGHUP and `down` stops it with SIGQUIT, sent straight to the verified
+  master pid. A config counts as active only after the marker socket
+  (`<folder of nginx.pidPath>/confirm.sock` by default) answers its hash; the rendered config now
+  contains that marker server. An nginx is adopted only when its `-c` value is exactly this
+  config file; one started with another file is `unverified` and never signalled.

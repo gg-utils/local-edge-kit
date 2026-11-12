@@ -128,13 +128,19 @@ symlinks.
 
 With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
 the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
-before it replaces the real one. A running nginx is then sent SIGHUP, or nginx is started when
-none runs (never without the certificate and key). If that reload or start fails, the previous
-config bytes are put back. The router counts as ours only when the pid in nginx's pid file matches
-the identity recorded in `<stateRoot>/router.state.json`, or is an `nginx: master process` of our
-user naming this config; any other process there is `unverified` and is never signalled or
-replaced. The state file also records which config the router last accepted, so a config that
-was written but never activated is reloaded on the next `up`. `down` sends SIGQUIT, checking the
+before it replaces the real one (an unchanged file that is not yet confirmed active is checked
+too). A running nginx is then sent SIGHUP, or nginx is started when none runs (never without the
+certificate and key). A delivered SIGHUP does not mean nginx took the new config, so the rendered
+config carries a loopback-only marker: a server on the unix socket
+`<folder of nginx.pidPath>/confirm.sock` (or `router.confirm.socketPath`) that answers
+`/local-edge-config` with the SHA-256 of the render. After the signal or start, `up` polls it
+(`router.confirm.timeoutMs`, default 5 s) and records the config as active only once it answers
+the new hash. If the reload fails or is not confirmed, the previous config bytes are put back and
+nothing is recorded as active, so the next `up` tries again. The router counts as ours only when
+the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
+is an `nginx: master process` of our user whose single `-c` value is the same file as this config
+after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
+other process there is `unverified` and is never signalled or replaced. `down` sends SIGQUIT, checking the
 identity again right before the signal. `status` adds a `router` row with the nginx pid and the
 Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
 is never changed by the supervisor.

@@ -134,6 +134,13 @@ export type LocalEdgeKit_SupervisorHost = {
         stdout: string;
         stderr: string;
     };
+    /** Canonical path with symlinks resolved, or null when it does not exist. */
+    realPath(filePath: string): string | null;
+    /**
+     * GETs `urlPath` over the HTTP unix socket `socketPath` and returns the body of a 200 answer,
+     * or null on any error, other status or timeout.
+     */
+    fetchUnixSocketText(socketPath: string, urlPath: string, timeoutMs: number): string | null;
     removeFile(filePath: string): void;
     fileSize(filePath: string): number;
     pidIsAlive(pid: number): boolean;
