@@ -3,7 +3,8 @@
  * loopback apps described by a project-owned config, each with a pid file and a log file.
  *
  * The supervisor never assumes it started a process. When it starts one it records the pid with
- * the process's identity (owner uid, start time, command line; see `process-identity.ts`). An
+ * the process's identity (owner uid, start time, command line and a launch id it put in the
+ * process environment; see `process-identity.ts`). An
  * app counts as running only when its pid file names a live process whose identity still
  * matches and the app's loopback port is held by that process's tree, so a run started by
  * another supervisor invocation is adopted instead of started twice, and a recycled pid is never
@@ -13,8 +14,10 @@
  * helper, checking the identity again immediately before every signal.
  *
  * Concurrency: inspection, start and pid file publication (and inspection plus stop) run under
- * a per-app lock file (`<pidFile>.lock`, created with `O_EXCL`). A lock whose owner process is
- * gone is taken over; a live owner makes the other supervisor fail with a clear message.
+ * a per-app lock file (`<pidFile>.lock`, published complete by temp file + `link`). A lock
+ * whose owner process is gone is taken over under a guard that removes only that exact stale
+ * lock (see `LocalEdgeKit_acquireSupervisorLock`); a live owner makes the other supervisor fail
+ * with a clear message.
  *
  * Files: pid and lock files are written inside the app's `cwd` through `safe-write.ts`
  * (no symlinks followed, atomic replace, 0600 files, 0700 folders); the log is opened for
@@ -30,11 +33,12 @@
  * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { closeSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { LocalEdgeCore_isHealthyHttpStatusCode } from "@gg-utils/local-edge-core/healthcheck";
 import { LocalEdgeCore_runtimeStopParsePidLines, LocalEdgeCore_runtimeStopTerminatePidList, } from "@gg-utils/local-edge-core/runtime-stop";
-import { LocalEdgeKit_formatPidFile, LocalEdgeKit_parsePidFile, LocalEdgeKit_readProcessIdentity, LocalEdgeKit_verifyProcessIdentity, } from "./process-identity.js";
+import { LOCAL_EDGE_KIT_LAUNCH_ID_ENV, LocalEdgeKit_formatPidFile, LocalEdgeKit_newLaunchId, LocalEdgeKit_parsePidFile, LocalEdgeKit_readProcessIdentity, LocalEdgeKit_verifyProcessIdentity, } from "./process-identity.js";
 import { LocalEdgeKit_createFileExclusive, LocalEdgeKit_openAppendSafe, LocalEdgeKit_writeFileAtomic } from "./safe-write.js";
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS = 60_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS = 10_000;
@@ -110,7 +114,7 @@ export function LocalEdgeKit_createSupervisorHost() {
                 const child = spawn(options.command, [...options.args], {
                     cwd: options.cwd,
                     detached: true,
-                    env: process.env,
+                    env: options.launchId === undefined ? process.env : { ...process.env, [LOCAL_EDGE_KIT_LAUNCH_ID_ENV]: options.launchId },
                     stdio: ["ignore", fd, fd],
                 });
                 child.unref();
@@ -422,10 +426,101 @@ export async function LocalEdgeKit_waitForSupervisedAppReady(options) {
         await host.sleep(LOCAL_EDGE_KIT_SUPERVISOR_POLL_MS);
     }
 }
+/** Lock and guard file text: pid, identity JSON (empty when unreadable) and a random token. */
+function LocalEdgeKit_formatLockFile(pid, identity, token) {
+    return `${String(pid)}\n${identity === null ? "" : JSON.stringify(identity)}\n${token}\n`;
+}
+/** Parses lock or guard text; `token` is null for an empty, partial or older lock. */
+function LocalEdgeKit_parseLockFile(text) {
+    const token = text.split("\n")[2]?.trim() ?? "";
+    return { ...LocalEdgeKit_parsePidFile(text), token: /^[0-9a-f]{32}$/.test(token) ? token : null };
+}
+/** True only when the holder's process is provably gone: dead, or its identity changed. */
+function LocalEdgeKit_lockHolderGone(host, holder) {
+    const current = host.processIdentity(holder.pid);
+    if (current === null) {
+        return !host.pidIsAlive(holder.pid);
+    }
+    const check = LocalEdgeKit_verifyProcessIdentity({ pid: holder.pid, recorded: holder.identity, current });
+    return !check.ok && check.reason !== "unrecorded";
+}
+const LOCAL_EDGE_KIT_LOCK_MAX_GUARD_DEPTH = 4;
+/** Guard key for one exact lock content: its SHA-256, shortened. */
+function LocalEdgeKit_lockContentKey(text) {
+    return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 32);
+}
+/**
+ * Removes the stale file at `filePath` only if it is still exactly `seenText`, under the
+ * takeover guard `<filePath>.takeover-<key of seenText>`.
+ *
+ * @returns `"retry"` when the caller should try to publish again, or an error message.
+ */
+function LocalEdgeKit_removeStaleUnderGuard(options) {
+    const { filePath, host, root } = options;
+    const guardFile = `${filePath}.takeover-${LocalEdgeKit_lockContentKey(options.seenText)}`;
+    const guardToken = randomBytes(16).toString("hex");
+    if (!host.createExclusive(guardFile, options.ownText(guardToken), { root })) {
+        const guardText = host.readText(guardFile);
+        if (guardText === null) {
+            return "retry";
+        }
+        const guard = LocalEdgeKit_parseLockFile(guardText);
+        if (guard.pid === null || guard.identity === null) {
+            return { error: `takeover guard ${guardFile} is empty or unreadable; if no supervisor runs, remove it` };
+        }
+        if (!LocalEdgeKit_lockHolderGone(host, { pid: guard.pid, identity: guard.identity })) {
+            return { error: `another supervisor (pid ${String(guard.pid)}) is taking over ${filePath}` };
+        }
+        if (options.depth >= LOCAL_EDGE_KIT_LOCK_MAX_GUARD_DEPTH) {
+            return { error: `too many abandoned takeover guards beside ${filePath}; remove them by hand` };
+        }
+        const nested = LocalEdgeKit_removeStaleUnderGuard({
+            ...options,
+            filePath: guardFile,
+            seenText: guardText,
+            depth: options.depth + 1,
+        });
+        return nested === "retry" ? "retry" : nested;
+    }
+    try {
+        if (host.readText(filePath) === options.seenText) {
+            host.removeFile(filePath);
+        }
+    }
+    finally {
+        const guardNow = host.readText(guardFile);
+        if (guardNow !== null && LocalEdgeKit_parseLockFile(guardNow).token === guardToken) {
+            host.removeFile(guardFile);
+        }
+    }
+    return "retry";
+}
 /**
  * Takes the per-app supervisor lock `<pidFile>.lock` inside the app's `cwd`. The lock file holds
- * the owner's pid and identity. A lock whose owner is gone (or is a recycled pid) is taken over
- * once; a live owner, or an owner without a readable identity, keeps it.
+ * the owner's pid, identity and a random 128-bit token. A lock whose owner is gone (or is a
+ * recycled pid) is taken over; a live owner, or an owner without a readable identity, keeps it.
+ *
+ * Why at most one owner:
+ * 1. Publication is atomic. `host.createExclusive` writes the complete text to a unique temp
+ *    file and `link()`s it to the lock path, which fails with EEXIST when a lock exists. A lock
+ *    is therefore never visible empty or half-written, and no two creations both succeed.
+ * 2. A lock file is removed only by its owner's `release` (which re-reads it and removes it
+ *    only when it holds the owner's token) or by a takeover. An owner cannot lose its lock while
+ *    it is alive, because a takeover needs the holder to be provably gone.
+ * 3. A takeover of the stale lock S first creates the guard `<lock>.takeover-<k>`, where `k`
+ *    is the SHA-256 of S's bytes, the same exclusive way, then re-reads the lock and removes it
+ *    only when its bytes are still exactly S. While the guard is held, S cannot be replaced: its
+ *    owner is dead, only the guard holder may remove it, and nothing can be published over an
+ *    existing file. So the removal removes S and never a successor. A contender that judged S
+ *    stale too, but gets the guard only after S was removed, finds other bytes and removes
+ *    nothing. Every lock carries a random token (an older version's lock carries the identity
+ *    of a process that is now gone), so no later lock has S's bytes.
+ * 4. A guard whose holder died is itself stale and is taken over by the same rule, under the
+ *    guard `<guard>.takeover-<k>` (at most four levels deep).
+ * 5. A lock without a pid and a complete identity (empty or partial) is never removed
+ *    automatically: an older version, which wrote after an exclusive open, could still be
+ *    writing it. The caller gets an error that says to remove it by
+ *    hand once no supervisor runs.
  *
  * @param app - The app; `pidFile` and `cwd` locate the lock.
  * @param host - Supervisor host.
@@ -440,32 +535,46 @@ export function LocalEdgeKit_acquireSupervisorLock(app, host) {
     const root = app.cwd ?? process.cwd();
     const lockFile = `${LocalEdgeKit_resolveAppPath(app, app.pidFile)}.lock`;
     const ownPid = host.ownPid();
-    const text = LocalEdgeKit_formatPidFile(ownPid, host.processIdentity(ownPid));
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (host.createExclusive(lockFile, text, { root })) {
+    const ownIdentity = host.processIdentity(ownPid);
+    const ownText = (token) => LocalEdgeKit_formatLockFile(ownPid, ownIdentity, token);
+    const token = randomBytes(16).toString("hex");
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (host.createExclusive(lockFile, ownText(token), { root })) {
             return {
                 lock: {
                     release: () => {
-                        if (LocalEdgeKit_parsePidFile(host.readText(lockFile)).pid === ownPid) {
+                        const now = host.readText(lockFile);
+                        if (now !== null && LocalEdgeKit_parseLockFile(now).token === token) {
                             host.removeFile(lockFile);
                         }
                     },
                 },
             };
         }
-        const holder = LocalEdgeKit_parsePidFile(host.readText(lockFile));
-        if (holder.pid === null) {
-            // Half-written or empty lock: only a crash between create and write leaves one.
-            host.removeFile(lockFile);
+        const seenText = host.readText(lockFile);
+        if (seenText === null) {
             continue;
         }
-        const current = host.processIdentity(holder.pid);
-        const check = LocalEdgeKit_verifyProcessIdentity({ pid: holder.pid, recorded: holder.identity, current });
-        const holderGone = current === null ? !host.pidIsAlive(holder.pid) : !check.ok && check.reason !== "unrecorded";
-        if (!holderGone) {
+        const holder = LocalEdgeKit_parseLockFile(seenText);
+        if (holder.pid === null || holder.identity === null) {
+            return {
+                error: `${lockFile} is empty or unreadable (a supervisor may still be writing it); if no supervisor runs, remove it`,
+            };
+        }
+        if (!LocalEdgeKit_lockHolderGone(host, { pid: holder.pid, identity: holder.identity })) {
             return { error: `another supervisor (pid ${String(holder.pid)}) holds ${lockFile}` };
         }
-        host.removeFile(lockFile);
+        const removed = LocalEdgeKit_removeStaleUnderGuard({
+            filePath: lockFile,
+            seenText,
+            root,
+            host,
+            ownText,
+            depth: 0,
+        });
+        if (removed !== "retry") {
+            return removed;
+        }
     }
     return { error: `could not take ${lockFile}` };
 }
@@ -538,8 +647,10 @@ function LocalEdgeKit_startUnderLock(app, host, out) {
         const root = app.cwd ?? process.cwd();
         const logFile = LocalEdgeKit_resolveAppPath(app, app.logFile);
         const logOffset = host.fileSize(logFile);
-        const pid = host.spawnDetached({ cwd: root, command: app.command ?? "", args: app.args ?? [], logFile, logRoot: root });
-        const identity = host.processIdentity(pid);
+        const launchId = LocalEdgeKit_newLaunchId();
+        const pid = host.spawnDetached({ cwd: root, command: app.command ?? "", args: app.args ?? [], logFile, logRoot: root, launchId });
+        const read = host.processIdentity(pid);
+        const identity = read === null ? null : { ...read, launchId };
         host.writeText(LocalEdgeKit_resolveAppPath(app, app.pidFile), LocalEdgeKit_formatPidFile(pid, identity), { root });
         out.write(`[${app.id}] started pid ${String(pid)}, waiting for health\n`);
         return { action: "started", pid, logOffset, identity };
@@ -561,12 +672,14 @@ function LocalEdgeKit_refreshRecordedIdentity(app, host, pid, recorded) {
         current === null ||
         current.uid !== recorded.uid ||
         current.startedAt !== recorded.startedAt ||
-        current.command === recorded.command) {
+        current.command === recorded.command ||
+        (typeof recorded.launchId === "string" && current.launchId !== undefined && current.launchId !== recorded.launchId)) {
         return;
     }
     const pidFile = LocalEdgeKit_resolveAppPath(app, app.pidFile);
     if (LocalEdgeKit_parsePidFile(host.readText(pidFile)).pid === pid) {
-        host.writeText(pidFile, LocalEdgeKit_formatPidFile(pid, current), { root: app.cwd ?? process.cwd() });
+        const refreshed = { uid: current.uid, startedAt: current.startedAt, command: current.command, ...(typeof recorded.launchId === "string" ? { launchId: recorded.launchId } : {}) };
+        host.writeText(pidFile, LocalEdgeKit_formatPidFile(pid, refreshed), { root: app.cwd ?? process.cwd() });
     }
 }
 /**
