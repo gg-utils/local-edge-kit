@@ -22,7 +22,9 @@
  * Files: pid and lock files are written inside the app's `cwd` through `safe-write.ts`
  * (no symlinks followed, atomic replace, 0600 files, 0700 folders); the log is opened for
  * append the same way. A pid or log path outside `cwd` is refused.
- * Env checks read names only: values are never returned or printed.
+ * Env checks read names only: values are never returned or printed. Launch env values go to the
+ * started process only; output lists their names. External apps are route only: never started,
+ * stopped or signalled.
  * Flow: config -> validate + dependency order -> lock -> inspect (pid file + identity + port)
  * -> start/stop -> publish pid file -> unlock -> health.
  *
@@ -45,26 +47,49 @@ export type LocalEdgeKit_SupervisedApp = {
     /** Executable. Required for enabled apps. Spawned without a shell. */
     command?: string | undefined;
     args?: readonly string[] | undefined;
+    /**
+     * Route only: the supervisor never starts, stops, adopts or signals this app's process. It is
+     * listed, probed for health and exposed, nothing more.
+     */
+    external?: boolean | undefined;
     /** Env file whose variable NAMES are checked before start. */
     envFile?: string | undefined;
     requiredEnvNames?: readonly string[] | undefined;
+    /**
+     * Values passed to the process at start, over the supervisor's own env. A function is called
+     * only when the app is actually started. Names count as present for `requiredEnvNames`. Only
+     * the names are ever printed.
+     */
+    launchEnv?: Readonly<Record<string, string>> | (() => Readonly<Record<string, string>>) | undefined;
     localPort: number;
     /** Edge port for port-based exposure backends. */
     edgePort?: number | undefined;
+    /** Host label for name-based backends. Defaults to `id`. */
+    edgeName?: string | undefined;
+    /** Extra path routes for name-based backends (`path` -> `127.0.0.1:<localPort><upstreamPath>`). */
+    locations?: readonly {
+        path: string;
+        localPort: number;
+        upstreamPath?: string | undefined;
+    }[] | undefined;
+    /** Hostname pattern for this app only (name-based backends), for a host under another label. */
+    hostnameTemplate?: string | undefined;
     /** HTTP path that must answer 2xx/3xx for the app to count as healthy. */
     healthPath: string;
     /** Optional second HTTP path that must answer before the app counts as ready. */
     readyPath?: string | undefined;
     /** Optional text that must appear in the log after start before the app counts as ready. */
     readyLogLine?: string | undefined;
-    pidFile: string;
-    logFile: string;
+    /** Pid file. Required for enabled apps the supervisor runs. */
+    pidFile?: string | undefined;
+    /** Log file the process appends to. Required for enabled apps the supervisor runs. */
+    logFile?: string | undefined;
     dependsOn?: readonly string[] | undefined;
     startTimeoutMs?: number | undefined;
     stopTimeoutMs?: number | undefined;
 };
 /** Observed process state of one app. */
-export type LocalEdgeKit_SupervisedAppState = "running" | "starting" | "port-busy" | "stale-pid" | "unverified" | "stopped" | "disabled";
+export type LocalEdgeKit_SupervisedAppState = "running" | "starting" | "port-busy" | "stale-pid" | "unverified" | "stopped" | "disabled" | "external";
 /** Inspection result for one app. */
 export type LocalEdgeKit_SupervisedAppInspection = {
     appId: string;
@@ -99,6 +124,23 @@ export type LocalEdgeKit_SupervisorHost = {
     createExclusive(filePath: string, text: string, options: {
         root: string;
     }): boolean;
+    /** Creates a folder (0700) inside `root` without following symlinks. */
+    ensureDir(dirPath: string, options: {
+        root: string;
+    }): void;
+    /** Runs a short command to completion. Never through a shell. */
+    runCommand(command: string, args: readonly string[]): {
+        status: number | null;
+        stdout: string;
+        stderr: string;
+    };
+    /** Canonical path with symlinks resolved, or null when it does not exist. */
+    realPath(filePath: string): string | null;
+    /**
+     * GETs `urlPath` over the HTTP unix socket `socketPath` and returns the body of a 200 answer,
+     * or null on any error, other status or timeout.
+     */
+    fetchUnixSocketText(socketPath: string, urlPath: string, timeoutMs: number): string | null;
     removeFile(filePath: string): void;
     fileSize(filePath: string): number;
     pidIsAlive(pid: number): boolean;
@@ -120,6 +162,8 @@ export type LocalEdgeKit_SupervisorHost = {
         logFile: string;
         /** Folder the log file must stay inside. */
         logRoot: string;
+        /** Values set over the supervisor's env for this process. */
+        env?: Readonly<Record<string, string>> | undefined;
         /** Random id passed to the process as `LOCAL_EDGE_KIT_LAUNCH_ID` and recorded with its pid. */
         launchId?: string | undefined;
     }): number;
@@ -137,6 +181,8 @@ export type LocalEdgeKit_SupervisorStepResult = {
     ok: boolean;
     action: "started" | "adopted" | "stopped" | "already-stopped" | "skipped" | "failed";
     message: string;
+    /** Router only: every failed rollback or cleanup step on this result, in order. Absent when none failed. */
+    errors?: readonly string[];
 };
 /**
  * Real host effects: `ps`/`lsof` for inspection, `process.kill` for signals, `safe-write.ts` for

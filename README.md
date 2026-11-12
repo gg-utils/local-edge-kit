@@ -83,7 +83,9 @@ flowchart TD
 ## App Supervisor
 
 `@gg-utils/local-edge-kit/supervisor-cli` runs a set of loopback apps from one command and
-exposes them through a core exposure backend (`tailscale-serve-ports` by default).
+exposes them through a core exposure backend. Set `exposure.backend` to `ports` (the default:
+one tailnet HTTPS port per app) or `hostnames` (one public name per app under one wildcard,
+routed by SNI through a loopback nginx, configured by `exposure.hostnames`). `--backend=<name>` overrides the choice for one command.
 
 ```ts
 import { LocalEdgeKit_runSupervisorCli } from "@gg-utils/local-edge-kit/supervisor-cli";
@@ -93,7 +95,10 @@ process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slic
 
 Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs, a loopback port,
 an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
-and `dependsOn`.
+and `dependsOn`. `launchEnv` (values, or a function called only when the app is started) is set
+over the supervisor's env for that process; it counts toward the required names and only its
+names are printed. `external: true` marks a route-only app: it is listed, probed and routed, but
+never started, stopped or signalled. `locations` adds extra path routes for the hostnames backend.
 
 | Command | What it does |
 |---|---|
@@ -117,7 +122,33 @@ identity still matches and whose process tree holds the port, so a run started b
 (written by another tool) is shown as `unverified`; such a process is never adopted or
 signalled. `down` checks the identity again immediately before every signal. A port held by any
 other process is reported as `port-busy`, and the supervisor never signals that process. The env
-check reads names only and never returns or prints values.
+check reads names only and never returns or prints values. Pid files are written atomically
+(temp file, fsync, rename) inside the app's `cwd`, and log files are opened without following
+symlinks.
+
+With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
+the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
+before it replaces the real one (an unchanged file that is not yet confirmed active is checked
+too). A running nginx is then sent SIGHUP, or nginx is started when none runs (never without the
+certificate and key). A delivered SIGHUP does not mean nginx took the new config, so the rendered
+config carries a loopback-only marker: a server on the unix socket
+`<folder of nginx.pidPath>/confirm.sock` (or `router.confirm.socketPath`) that answers
+`/local-edge-config` with the SHA-256 of the render. After the signal or start, `up` polls it
+(`router.confirm.timeoutMs`, default 5 s) and records the config as active only once it answers
+the new hash. If the reload or start fails or is not confirmed, the previous config bytes are put
+back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
+and nothing is recorded as active, so the next `up` tries again. Each rollback step (stop, record
+not active, restore or remove the config) runs even when an earlier one failed, and the failures are
+listed in the failed result's `errors`. If nginx confirmed the new config but its state file cannot
+be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
+place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
+the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
+is an `nginx: master process` of our user whose single `-c` value is the same file as this config
+after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
+other process there is `unverified` and is never signalled or replaced. `down` sends SIGQUIT, checking the
+identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
+is never changed by the supervisor.
 
 `up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
 publish the pid file, so two supervisors cannot start the same app twice. A lock file appears

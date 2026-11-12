@@ -32,10 +32,12 @@ export function fakePidFile(pid: number, overrides: Partial<LocalEdgeKit_Process
   return LocalEdgeKit_formatPidFile(pid, fakeIdentity(pid, overrides));
 }
 
-/** Fake host plus the recorded effects tests assert on. */
+/** Fake host plus the recorded effects tests assert on. The supervisor itself is pid 1000. */
 export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
-  spawned: { cwd: string; command: string; args: readonly string[]; launchId?: string | undefined }[];
+  spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined; launchId?: string | undefined }[];
+  commands: string[][];
+  dirs: string[];
   files: Map<string, string>;
   processes: Map<number, FakeProcess & { alive: boolean }>;
   /** Every lock file creation attempt, in order. */
@@ -49,8 +51,17 @@ export function fakeHost(seed: {
   ownGroup?: number;
   healthy?: (url: string) => number | null;
   onSpawn?: (host: FakeSupervisorHost, pid: number) => void;
+  onCommand?: (
+    host: FakeSupervisorHost,
+    command: string,
+    args: readonly string[],
+  ) => { status: number | null; stdout: string; stderr: string } | undefined;
   /** Shares files and processes with other fake hosts, to model concurrent supervisors. */
   shared?: { files: Map<string, string>; processes: Map<number, FakeProcess & { alive: boolean }> };
+  /** Canonical paths the fake `realPath` returns; any other path is returned unchanged. */
+  realPaths?: Record<string, string>;
+  /** Answers `fetchUnixSocketText`; default null (no answer). */
+  fetchUnixSocket?: (socketPath: string, urlPath: string) => string | null;
   /** This supervisor's own pid. Default 1000. */
   ownPid?: number;
   /** Called after every read with the path and the text returned; used to interleave contenders. */
@@ -59,13 +70,17 @@ export function fakeHost(seed: {
   const files = seed.shared?.files ?? new Map(Object.entries(seed.files ?? {}));
   const processes = seed.shared?.processes ?? new Map((seed.processes ?? []).map((p) => [p.pid, { ...p, alive: true }]));
   const signals: { pid: number; signal: string | 0 }[] = [];
-  const spawned: { cwd: string; command: string; args: readonly string[]; launchId?: string | undefined }[] = [];
+  const spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined; launchId?: string | undefined }[] = [];
+  const commands: string[][] = [];
+  const dirs: string[] = [];
   let clock = 0;
   let nextPid = 9000;
   const lockAttempts: string[] = [];
   const host: FakeSupervisorHost = {
     signals,
     spawned,
+    commands,
+    dirs,
     files,
     processes,
     lockAttempts,
@@ -75,6 +90,11 @@ export function fakeHost(seed: {
       return text;
     },
     writeText: (filePath, text) => void files.set(filePath, text),
+    ensureDir: (dirPath) => void dirs.push(dirPath),
+    runCommand: (command, args) => {
+      commands.push([command, ...args]);
+      return seed.onCommand?.(host, command, args) ?? { status: 0, stdout: "", stderr: "" };
+    },
     createExclusive: (filePath, text) => {
       lockAttempts.push(filePath);
       if (files.has(filePath)) {
@@ -83,10 +103,15 @@ export function fakeHost(seed: {
       files.set(filePath, text);
       return true;
     },
+    realPath: (filePath) => seed.realPaths?.[filePath] ?? filePath,
+    fetchUnixSocketText: (socketPath, urlPath) => seed.fetchUnixSocket?.(socketPath, urlPath) ?? null,
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
     processIdentity: (pid) => {
+      if (pid === 1000) {
+        return fakeIdentity(1000);
+      }
       const p = processes.get(pid);
       return p?.alive
         ? fakeIdentity(pid, {
@@ -111,7 +136,7 @@ export function fakeHost(seed: {
       if (live.length === 0) {
         throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
       }
-      if (signal === "SIGTERM" || signal === "SIGKILL") {
+      if (signal === "SIGTERM" || signal === "SIGKILL" || signal === "SIGQUIT") {
         for (const p of live) {
           if (p) p.alive = false;
         }

@@ -17,14 +17,25 @@ import { spawn } from "node:child_process";
 
 import {
   type LocalEdgeCore_ExposureBackend,
+  type LocalEdgeCore_ExposureHostnamesConfig,
   type LocalEdgeCore_ExposureManifest,
   type LocalEdgeCore_ExposureStatusEntry,
   LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND,
+  LOCAL_EDGE_CORE_HOSTNAMES_BACKEND,
   LocalEdgeCore_createExposureBackend,
+  LocalEdgeCore_observeHostnamesServeTcp,
+  LocalEdgeCore_resolveExposureBackendName,
   LocalEdgeCore_renderExposurePlanText,
 } from "@gg-utils/local-edge-core/exposure";
 
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
+import {
+  type LocalEdgeKit_SupervisorRouterConfig,
+  LOCAL_EDGE_KIT_ROUTER_ID,
+  LocalEdgeKit_inspectRouter,
+  LocalEdgeKit_routerDown,
+  LocalEdgeKit_routerUp,
+} from "./supervisor-router.js";
 import {
   type LocalEdgeKit_SupervisedApp,
   type LocalEdgeKit_SupervisorHost,
@@ -44,8 +55,18 @@ export type LocalEdgeKit_SupervisorConfig = {
   commandName?: string | undefined;
   apps: readonly LocalEdgeKit_SupervisedApp[];
   exposure: {
-    /** Backend used when `--backend` is not given. Defaults to the core default. */
-    backend?: string | undefined;
+    /**
+     * Backend used when `--backend` is not given: `ports` (default, tailnet HTTPS port per app)
+     * or `hostnames` (plan-only SNI hosts). Any registered core backend name also works.
+     */
+    backend?: "ports" | "hostnames" | (string & {}) | undefined;
+    /** Settings for the `hostnames` backend. */
+    hostnames?: LocalEdgeCore_ExposureHostnamesConfig | undefined;
+    /**
+     * Router lifecycle for the `hostnames` backend. When set, `up` writes the rendered nginx
+     * config and starts or reloads nginx, `down` stops it, and `status` shows it.
+     */
+    router?: LocalEdgeKit_SupervisorRouterConfig | undefined;
     /** Edge ports that are never mapped, changed or turned off. */
     protectedPorts: readonly number[];
     hostname?: string | undefined;
@@ -104,11 +125,15 @@ export function LocalEdgeKit_buildExposureManifest(
     protectedPorts: config.exposure.protectedPorts,
     hostname: config.exposure.hostname,
     rootZone: config.exposure.rootZone,
+    hostnames: config.exposure.hostnames,
     apps: config.apps.map((app) => ({
       id: app.id,
       enabled: app.enabled,
       localPort: app.localPort,
       edgePort: app.edgePort,
+      edgeName: app.edgeName,
+      locations: app.locations,
+      hostnameTemplate: app.hostnameTemplate,
     })),
   };
 }
@@ -139,11 +164,13 @@ function LocalEdgeKit_supervisorUsage(config: LocalEdgeKit_SupervisorConfig): st
     `Usage: ${name} <command> [args]`,
     "",
     "  status [--json] [--backend=<name>]   process, health and edge state per app",
-    "  up [app...]                          start apps (and dependencies), adopting running ones",
-    "  down [app...]                        stop apps (process group, TERM then KILL)",
+    "  up [app...|router]                   start apps (and dependencies), adopting running ones;",
+    "                                       with the hostnames backend also write the router config",
+    "                                       and start or reload nginx",
+    "  down [app...|router]                 stop apps (process group, TERM then KILL) and the router",
     "  health [app...] [--json]             probe health paths on 127.0.0.1",
     "  logs <app> [-n N] [-f]               tail an app log",
-    "  plan [--backend=<name>] [--remove] [--json]   show exposure actions (never changes anything)",
+    "  plan [--backend=ports|hostnames|<name>] [--remove] [--json]   show exposure actions (never changes anything)",
     "  expose [--backend=<name>] [--apply]  map edge URLs; dry run without --apply",
     "  unexpose [--backend=<name>] [--apply] remove edge URLs this config owns; dry run without --apply",
     "",
@@ -187,6 +214,12 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
   const backendName =
     typeof backendFlag === "string" ? backendFlag : (config.exposure.backend ?? LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND);
 
+  const usesRouter =
+    config.exposure.router !== undefined &&
+    LocalEdgeCore_resolveExposureBackendName(backendName) === LOCAL_EDGE_CORE_HOSTNAMES_BACKEND;
+  const routerRequested = parsed.positionals.length === 0 || parsed.positionals.includes(LOCAL_EDGE_KIT_ROUTER_ID);
+  const appPositionals = parsed.positionals.filter((id) => !usesRouter || id !== LOCAL_EDGE_KIT_ROUTER_ID);
+
   if (!command || command === "help" || command === "--help" || command === "-h") {
     stdout.write(LocalEdgeKit_supervisorUsage(config));
     return command ? 0 : 2;
@@ -214,11 +247,21 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
             return { app, inspection, health, edge: edge.get(app.id) ?? null };
           }),
         );
+        const router =
+          usesRouter && manifest.hostnames && config.exposure.router
+            ? {
+                inspection: LocalEdgeKit_inspectRouter({ manifest, host, router: config.exposure.router }),
+                serve: LocalEdgeCore_observeHostnamesServeTcp(manifest.hostnames, (cmd, args) => host.runCommand(cmd, args), "tailscale"),
+                listen: `${manifest.hostnames.routerHost}:${String(manifest.hostnames.routerPort)}`,
+                edgePort: manifest.hostnames.edgePort ?? manifest.hostnames.routerPort,
+              }
+            : null;
         if (json) {
           stdout.write(
             `${JSON.stringify(
               {
                 backend: backend.name,
+                router,
                 apps: rows.map((row) => ({
                   id: row.app.id,
                   enabled: row.app.enabled,
@@ -249,14 +292,30 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
                 row.edge?.edgeUrl ?? "-",
                 row.edge?.state ?? "-",
                 row.inspection.note,
-              ]),
+              ]).concat(
+                router === null
+                  ? []
+                  : [
+                      [
+                        LOCAL_EDGE_KIT_ROUTER_ID,
+                        router.inspection.state,
+                        router.inspection.pid === null ? "-" : String(router.inspection.pid),
+                        router.listen,
+                        "-",
+                        `serve :${String(router.edgePort)}`,
+                        router.serve.state,
+                        `${router.inspection.note}; ${router.serve.note}`,
+                      ],
+                    ],
+              ),
             ),
           );
         }
-        return rows.some((row) => row.app.enabled && row.health !== null && !row.health.healthy) ? 1 : 0;
+        const routerDown = router !== null && router.inspection.state !== "running";
+        return routerDown || rows.some((row) => row.app.enabled && row.health !== null && !row.health.healthy) ? 1 : 0;
       }
       case "health": {
-        const ids = LocalEdgeKit_selectIds(config, parsed.positionals);
+        const ids = LocalEdgeKit_selectIds(config, appPositionals);
         const apps = config.apps.filter((app) => ids.includes(app.id));
         const results = await Promise.all(apps.map((app) => LocalEdgeKit_probeSupervisedAppHealth(app, host)));
         if (json) {
@@ -277,11 +336,24 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
       }
       case "up":
       case "down": {
-        const ids = LocalEdgeKit_selectIds(config, parsed.positionals);
+        const onlyRouter = parsed.positionals.length > 0 && appPositionals.length === 0;
+        const ids = onlyRouter ? [] : LocalEdgeKit_selectIds(config, appPositionals);
+        const router = config.exposure.router;
+        const routerStep = usesRouter && routerRequested && router !== undefined;
         const results =
           command === "up"
             ? await LocalEdgeKit_supervisorUp({ apps: config.apps, requestedIds: ids, host, out: stderr })
-            : LocalEdgeKit_supervisorDown({ apps: config.apps, requestedIds: ids, host, out: stderr });
+            : [];
+        if (routerStep) {
+          results.push(
+            command === "up"
+              ? LocalEdgeKit_routerUp({ manifest, router, host, out: stderr })
+              : LocalEdgeKit_routerDown({ manifest, router, host }),
+          );
+        }
+        if (command === "down") {
+          results.push(...LocalEdgeKit_supervisorDown({ apps: config.apps, requestedIds: ids, host, out: stderr }));
+        }
         stdout.write(
           LocalEdgeKit_renderTable(
             ["APP", "RESULT", "MESSAGE"],
@@ -295,6 +367,10 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
         const app = config.apps.find((candidate) => candidate.id === id);
         if (!app) {
           stderr.write(`logs needs a known app id\n`);
+          return 2;
+        }
+        if (!app.logFile) {
+          stderr.write(`${app.id} has no log file (external apps are route only)\n`);
           return 2;
         }
         const linesFlag = parsed.flags.get("lines");

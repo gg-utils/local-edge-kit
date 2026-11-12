@@ -245,6 +245,49 @@ void test("down escalates to SIGKILL when TERM is ignored", () => {
   assert.deepEqual(host.signals.map((s) => s.signal), ["SIGTERM", "SIGKILL"]);
 });
 
+void test("launch env goes to the started process, counts for required names and prints names only", async () => {
+  const host = fakeHost({ onSpawn: (h, pid) => h.processes.set(pid, { pid, group: pid, port: 4300, alive: true }) });
+  const out: string[] = [];
+  const app = {
+    id: "api",
+    enabled: true,
+    cwd: "/w/api",
+    command: "node",
+    localPort: 4300,
+    healthPath: "/health",
+    pidFile: "p",
+    logFile: "l",
+    requiredEnvNames: ["API_ISSUER"],
+    launchEnv: () => ({ API_ISSUER: "https://secret-looking-value.example.test" }),
+  };
+  const results = await LocalEdgeKit_supervisorUp({ apps: [app], requestedIds: ["api"], host, out: { write: (m: string) => out.push(m) } });
+  assert.equal(results[0]?.action, "started");
+  assert.deepEqual(host.spawned[0]?.env, { API_ISSUER: "https://secret-looking-value.example.test" });
+  assert.ok(out.join("").includes("launch env: API_ISSUER"));
+  assert.ok(!out.join("").includes("secret-looking-value"));
+  const failing = await LocalEdgeKit_supervisorUp({
+    apps: [{ ...app, launchEnv: () => { throw new Error("plan command failed"); } }],
+    requestedIds: ["api"],
+    host: fakeHost(),
+    out: { write: () => undefined },
+  });
+  assert.match(failing[0]?.message ?? "", /launch env unavailable: plan command failed/);
+});
+
+void test("external apps are listed and probed but never started, stopped or signalled", async () => {
+  const host = fakeHost({ processes: [{ pid: 31, group: 31, port: 3100 }] });
+  const app = { id: "lane", enabled: true, external: true, localPort: 3100, healthPath: "/" };
+  assert.deepEqual(LocalEdgeKit_validateSupervisedApps([app]), []);
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(app, host).state, "external");
+  const up = await LocalEdgeKit_supervisorUp({ apps: [app], requestedIds: ["lane"], host, out: { write: () => undefined } });
+  assert.equal(up[0]?.action, "skipped");
+  const down = LocalEdgeKit_supervisorDown({ apps: [app], requestedIds: ["lane"], host, out: { write: () => undefined } });
+  assert.equal(down[0]?.action, "skipped");
+  assert.equal(host.spawned.length, 0);
+  assert.equal(host.signals.length, 0);
+  assert.match(LocalEdgeKit_validateSupervisedApps([{ ...app, command: "x" }])[0] ?? "", /route only/);
+});
+
 void test("a recycled pid holding the port is never adopted or signalled", async () => {
   const seed = () =>
     fakeHost({
