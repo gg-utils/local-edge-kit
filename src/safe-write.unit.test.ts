@@ -11,7 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -41,8 +41,10 @@ void test("writes atomically with 0600 files and 0700 new folders, keeping an ex
     assert.equal(statSync(file).mode & 0o777, 0o600);
     assert.equal(statSync(path.join(box.root, "a")).mode & 0o777, 0o700);
     assert.equal(statSync(path.join(box.root, "a", "b")).mode & 0o777, 0o700);
+    chmodSync(file, 0o640);
     LocalEdgeKit_writeFileAtomic(file, "2\n", { root: box.root });
     assert.equal(readFileSync(file, "utf8"), "2\n");
+    assert.equal(statSync(file).mode & 0o777, 0o640);
     assert.deepEqual(readdirSync(path.dirname(file)), ["state.pid"]);
   } finally {
     box.done();

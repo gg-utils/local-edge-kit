@@ -158,9 +158,9 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                     const health = inspection.state === "running" ? await LocalEdgeKit_probeSupervisedAppHealth(app, host) : null;
                     return { app, inspection, health, edge: edge.get(app.id) ?? null };
                 }));
-                const router = usesRouter && manifest.hostnames
+                const router = usesRouter && manifest.hostnames && config.exposure.router
                     ? {
-                        inspection: LocalEdgeKit_inspectRouter({ manifest, host }),
+                        inspection: LocalEdgeKit_inspectRouter({ manifest, host, router: config.exposure.router }),
                         serve: LocalEdgeCore_observeHostnamesServeTcp(manifest.hostnames, (cmd, args) => host.runCommand(cmd, args), "tailscale"),
                         listen: `${manifest.hostnames.routerHost}:${String(manifest.hostnames.routerPort)}`,
                         edgePort: manifest.hostnames.edgePort ?? manifest.hostnames.routerPort,

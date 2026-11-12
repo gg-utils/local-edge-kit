@@ -123,11 +123,16 @@ symlinks.
 
 With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
 the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
-before it replaces the real one, then a running nginx (adopted by its pid file) gets
-`-s reload`; nginx is started only when none runs, and never without the certificate and key.
-`down` sends `-s quit`. `status` adds a `router` row with the nginx pid and the Serve raw-TCP
-mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself is never
-changed by the supervisor.
+before it replaces the real one. A running nginx is then sent SIGHUP, or nginx is started when
+none runs (never without the certificate and key). If that reload or start fails, the previous
+config bytes are put back. The router counts as ours only when the pid in nginx's pid file matches
+the identity recorded in `<stateRoot>/router.state.json`, or is an `nginx: master process` of our
+user naming this config; any other process there is `unverified` and is never signalled or
+replaced. The state file also records which config the router last accepted, so a config that
+was written but never activated is reloaded on the next `up`. `down` sends SIGQUIT, checking the
+identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
+is never changed by the supervisor.
 
 `up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
 publish the pid file, so two supervisors cannot start the same app twice. A lock left by a

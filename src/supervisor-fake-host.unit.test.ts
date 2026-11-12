@@ -30,7 +30,7 @@ export function fakePidFile(pid: number, overrides: Partial<LocalEdgeKit_Process
   return LocalEdgeKit_formatPidFile(pid, fakeIdentity(pid, overrides));
 }
 
-/** Fake host plus the recorded effects tests assert on. */
+/** Fake host plus the recorded effects tests assert on. The supervisor itself is pid 1000. */
 export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
   spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[];
@@ -91,6 +91,9 @@ export function fakeHost(seed: {
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
     processIdentity: (pid) => {
+      if (pid === 1000) {
+        return fakeIdentity(1000);
+      }
       const p = processes.get(pid);
       return p?.alive ? fakeIdentity(pid, { ...(p.uid === undefined ? {} : { uid: p.uid }), ...(p.start === undefined ? {} : { startedAt: p.start }), ...(p.command === undefined ? {} : { command: p.command }) }) : null;
     },
@@ -108,7 +111,7 @@ export function fakeHost(seed: {
       if (live.length === 0) {
         throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
       }
-      if (signal === "SIGTERM" || signal === "SIGKILL") {
+      if (signal === "SIGTERM" || signal === "SIGKILL" || signal === "SIGQUIT") {
         for (const p of live) {
           if (p) p.alive = false;
         }

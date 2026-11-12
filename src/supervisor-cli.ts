@@ -248,9 +248,9 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
           }),
         );
         const router =
-          usesRouter && manifest.hostnames
+          usesRouter && manifest.hostnames && config.exposure.router
             ? {
-                inspection: LocalEdgeKit_inspectRouter({ manifest, host }),
+                inspection: LocalEdgeKit_inspectRouter({ manifest, host, router: config.exposure.router }),
                 serve: LocalEdgeCore_observeHostnamesServeTcp(manifest.hostnames, (cmd, args) => host.runCommand(cmd, args), "tailscale"),
                 listen: `${manifest.hostnames.routerHost}:${String(manifest.hostnames.routerPort)}`,
                 edgePort: manifest.hostnames.edgePort ?? manifest.hostnames.routerPort,
