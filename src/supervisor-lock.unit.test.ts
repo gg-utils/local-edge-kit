@@ -11,9 +11,10 @@
  */
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { type FakeProcess, type FakeSupervisorHost, fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
+import { type FakeProcess, type FakeSupervisorHost, fakeHost, fakeIdentity, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 import { type LocalEdgeKit_SupervisedApp, LocalEdgeKit_acquireSupervisorLock } from "./supervisor.js";
 
 const app: LocalEdgeKit_SupervisedApp = {
@@ -136,22 +137,17 @@ void test("a contender arriving while another holds the takeover guard refuses i
 
 void test("a takeover guard left by a dead contender is itself taken over, then the stale lock", () => {
   const stale = fakePidFile(4242);
-  const { contender, shared } = world({ [lockFile]: stale });
-  // A first contender takes the guard and dies before removing the stale lock.
-  let guardFile = "";
-  const dying = contender(2005, (filePath) => {
-    if (filePath === lockFile && guardFile === "") {
-      guardFile = [...shared.files.keys()].find((f) => f.includes("takeover")) ?? "";
-      if (guardFile !== "") throw new Error("crashed");
-    }
-  });
-  assert.throws(() => LocalEdgeKit_acquireSupervisorLock(app, dying), /crashed/);
-  assert.notEqual(guardFile, "");
-  const proc = shared.processes.get(2005);
-  if (proc) proc.alive = false;
+  // A contender (pid 2005) created the content-keyed guard for this exact stale lock and then
+  // died before it removed the lock or its guard: both files are still in place.
+  const guardFile = `${lockFile}.takeover-${createHash("sha256").update(stale, "utf8").digest("hex").slice(0, 32)}`;
+  const abandonedGuard = `2005\n${JSON.stringify(fakeIdentity(2005))}\n${"a".repeat(32)}\n`;
+  const { contender, shared } = world({ [lockFile]: stale, [guardFile]: abandonedGuard });
+  assert.equal(shared.processes.has(2005), false, "the guard owner is dead");
   const taken = LocalEdgeKit_acquireSupervisorLock(app, contender(2001));
-  assert.ok("lock" in taken);
+  assert.ok("lock" in taken, "error" in taken ? taken.error : "");
   assert.match(shared.files.get(lockFile) ?? "", /^2001\n/);
+  assert.equal(shared.files.has(guardFile), false, "the abandoned guard was removed");
+  assert.deepEqual([...shared.files.keys()].filter((f) => f.includes("takeover")), []);
 });
 
 void test("release removes only the releaser's own lock", () => {
