@@ -80,6 +80,36 @@ flowchart TD
     G --> H
 ```
 
+## App Supervisor
+
+`@gg-utils/local-edge-kit/supervisor-cli` runs a set of loopback apps from one command and
+exposes them through a core exposure backend (`tailscale-serve-ports` by default).
+
+```ts
+import { LocalEdgeKit_runSupervisorCli } from "@gg-utils/local-edge-kit/supervisor-cli";
+
+process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slice(2), config });
+```
+
+Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs, a loopback port,
+an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
+and `dependsOn`.
+
+| Command | What it does |
+|---|---|
+| `status [--json]` | Process state, health and edge state per app. |
+| `up [app...]` | Starts apps in dependency order and waits for health. Adopts a running app. |
+| `down [app...]` | Stops dependants first: SIGTERM to the process group, SIGKILL after the timeout. |
+| `health [app...]` | Probes the health and ready paths on `127.0.0.1`. |
+| `logs <app> [-n N] [-f]` | Tails the app log. |
+| `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
+| `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
+
+An app is adopted when its pid file names a live process and that process's group holds the
+port. Processes started by someone else are therefore never started twice. A port held by any
+other process is reported as `port-busy`, and the supervisor never signals that process. The env
+check reads names only and never returns or prints values.
+
 ## CLI
 
 The package exposes a `local-edge-kit` bin for script adapters that can execute TypeScript source

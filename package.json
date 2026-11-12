@@ -129,6 +129,14 @@
     "./ui-spawn-request": {
       "types": "./dist/ui-spawn-request.d.ts",
       "default": "./dist/ui-spawn-request.js"
+    },
+    "./supervisor": {
+      "types": "./dist/supervisor.d.ts",
+      "default": "./dist/supervisor.js"
+    },
+    "./supervisor-cli": {
+      "types": "./dist/supervisor-cli.d.ts",
+      "default": "./dist/supervisor-cli.js"
     }
   },
   "bin": {
@@ -146,7 +154,7 @@
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {
-    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#v0.2.0",
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#3901db3f94acf34aa4568a4ce16653d4f1ff2fd7",
     "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#v0.2.0",
     "ink": "6.8.0",
     "react": "19.3.1"
