@@ -87,7 +87,16 @@ function LocalEdgeKit_parseSupervisorArgs(args: readonly string[]): ParsedArgs {
   return { positionals, flags };
 }
 
-/** Builds the backend-neutral exposure manifest from supervisor apps. */
+/**
+ * Builds the backend-neutral exposure manifest from supervisor apps.
+ *
+ * @param config - Supervisor config.
+ * @returns The manifest the core exposure backends plan from.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_buildExposureManifest(config).apps.map((app) => app.id);
+ * ```
+ */
 export function LocalEdgeKit_buildExposureManifest(
   config: LocalEdgeKit_SupervisorConfig,
 ): LocalEdgeCore_ExposureManifest {
@@ -104,7 +113,17 @@ export function LocalEdgeKit_buildExposureManifest(
   };
 }
 
-/** Renders rows as a padded text table. */
+/**
+ * Renders rows as a padded text table.
+ *
+ * @param header - Column titles.
+ * @param rows - Cells; missing cells render empty.
+ * @returns Text with one line per row and a trailing newline.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_renderTable(["APP", "STATE"], [["web", "running"]]);
+ * ```
+ */
 export function LocalEdgeKit_renderTable(header: readonly string[], rows: readonly (readonly string[])[]): string {
   const widths = header.map((cell, column) =>
     Math.max(cell.length, ...rows.map((row) => (row[column] ?? "").length)),
@@ -144,8 +163,16 @@ function LocalEdgeKit_selectIds(config: LocalEdgeKit_SupervisorConfig, positiona
 }
 
 /**
- * Runs the supervisor CLI and returns a process exit code: 0 ok, 1 a step failed or an app is
- * unhealthy, 2 usage or config error.
+ * Runs the supervisor CLI.
+ *
+ * @param options - Argv after the program name, config, and optional injected host, backend
+ * factory, writers and log follower.
+ * @returns A process exit code: 0 ok, 1 a step failed or an app is unhealthy, 2 usage or config
+ * error (including any thrown error, whose message is printed).
+ * @example
+ * ```typescript
+ * process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slice(2), config });
+ * ```
  */
 export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSupervisorCliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;

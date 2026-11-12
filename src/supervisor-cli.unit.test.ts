@@ -14,9 +14,9 @@ import test from "node:test";
 import { LocalEdgeCore_createExposureBackend } from "@gg-utils/local-edge-core/exposure";
 
 import { type LocalEdgeKit_SupervisorConfig, LocalEdgeKit_runSupervisorCli } from "./supervisor-cli.js";
-import { fakeHost } from "./supervisor-fake-host.unit.test.js";
+import { fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 
-const HOST = "node-a.example.ts.net";
+const HOST = "node-a.example.test";
 
 function backendFactory(mapped: Record<string, string>) {
   const calls: string[] = [];
@@ -56,10 +56,10 @@ function capture() {
 void test("status prints a table with process, health and edge state", async () => {
   const stdout = capture();
   const backend = backendFactory({ "8451": "http://127.0.0.1:4300" });
-  const host = fakeHost({ files: { "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  const host = fakeHost({ files: { "/w/auth/p": fakePidFile(10) }, processes: [{ pid: 10, group: 10, port: 4300 }] });
   const code = await LocalEdgeKit_runSupervisorCli({ args: ["status"], config, host, createBackend: backend.create, stdout: stdout.writer });
   assert.equal(code, 0);
-  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.ts\.net:8451\s+exposed/);
+  assert.match(stdout.text(), /auth\s+running\s+10\s+127\.0\.0\.1:4300\s+ok\s+https:\/\/node-a\.example\.test:8451\s+exposed/);
   assert.match(stdout.text(), /later\s+disabled/);
 });
 

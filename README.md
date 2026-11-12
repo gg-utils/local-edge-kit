@@ -105,10 +105,22 @@ and `dependsOn`.
 | `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
 | `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
 
-An app is adopted when its pid file names a live process and that process's group holds the
-port. Processes started by someone else are therefore never started twice. A port held by any
+When `up` starts an app it writes the pid file with the process's identity: owner uid, start
+time and command line. An app is adopted only when its pid file names a live process whose
+identity still matches and whose process tree holds the port, so a run started by an earlier
+`up` is never started twice and a recycled pid is never adopted. A pid file without an identity
+(written by another tool) is shown as `unverified`; such a process is never adopted or
+signalled. `down` checks the identity again immediately before every signal. A port held by any
 other process is reported as `port-busy`, and the supervisor never signals that process. The env
 check reads names only and never returns or prints values.
+
+`up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
+publish the pid file, so two supervisors cannot start the same app twice. A lock left by a
+process that is gone is taken over. Pid, lock and log files must sit inside the app's `cwd`.
+They are written without following symlinks: folders are walked one level at a time and checked
+again after the open and before the rename, pid files are replaced atomically, and new files are
+`0600` and new folders `0700`. The `cwd` and its ancestors are trusted; folders below it must
+not be writable by other users (see `safe-write.ts` for the remaining window).
 
 ## CLI
 

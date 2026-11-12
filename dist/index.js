@@ -47,3 +47,5 @@ export * from "./ui-spawn-request.js";
 export * from "./urls-cli.js";
 export * from "./supervisor.js";
 export * from "./supervisor-cli.js";
+export * from "./safe-write.js";
+export * from "./process-identity.js";
