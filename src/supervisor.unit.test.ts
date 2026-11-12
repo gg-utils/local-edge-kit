@@ -141,7 +141,7 @@ void test("up adopts a running dependency and starts the dependant, waiting for 
   assert.deepEqual(results.map((r) => [r.appId, r.action]), [["auth", "adopted"], ["web", "started"]]);
   assert.equal(host.spawned.length, 1);
   assert.deepEqual(host.spawned[0]?.args, ["dev"]);
-  assert.equal(host.files.get("/w/web/.local/edge.pid"), fakePidFile(9001));
+  assert.equal(host.files.get("/w/web/.local/edge.pid"), fakePidFile(9001, { launchId: host.spawned[0]?.launchId }));
   assert.equal(host.signals.length, 0);
 });
 
@@ -392,6 +392,31 @@ void test("a start records the identity with the pid and refreshes a title the p
   });
   const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, requiredEnvNames: [] }));
   await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host, out });
-  assert.equal(host.files.get("/w/auth/.local/edge.pid"), fakePidFile(9001, { command: "renamed-by-itself" }));
+  const launchId = host.spawned[0]?.launchId;
+  assert.match(launchId ?? "", /^[0-9a-f]{32}$/);
+  assert.equal(host.files.get("/w/auth/.local/edge.pid"), fakePidFile(9001, { command: "renamed-by-itself", launchId }));
   assert.equal(LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host, out })[0]?.action, "stopped");
+});
+
+void test("a pid reused in the same second by the same user and command line is not adopted or signalled", async () => {
+  const host = fakeHost({
+    onSpawn: (h, pid) => {
+      const proc = h.processes.get(pid);
+      if (proc) proc.port = 4300;
+    },
+  });
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, requiredEnvNames: [] }));
+  await LocalEdgeKit_supervisorUp({ apps: auth, requestedIds: ["auth"], host, out });
+  const proc = host.processes.get(9001);
+  assert.ok(proc);
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth[0] as LocalEdgeKit_SupervisedApp, host).state, "running");
+  // The started process exits; another one gets the same pid within the same second, with the
+  // same uid, start time display and command line, but without our launch id.
+  proc.launchId = null;
+  assert.notEqual(LocalEdgeKit_inspectSupervisedApp(auth[0] as LocalEdgeKit_SupervisedApp, host).state, "running");
+  LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host, out });
+  assert.deepEqual(host.signals, []);
+  // Where the environment cannot be read, the check falls back to uid, start time and command.
+  delete proc.launchId;
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(auth[0] as LocalEdgeKit_SupervisedApp, host).state, "running");
 });

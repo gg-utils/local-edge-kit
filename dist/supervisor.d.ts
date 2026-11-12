@@ -3,7 +3,8 @@
  * loopback apps described by a project-owned config, each with a pid file and a log file.
  *
  * The supervisor never assumes it started a process. When it starts one it records the pid with
- * the process's identity (owner uid, start time, command line; see `process-identity.ts`). An
+ * the process's identity (owner uid, start time, command line and a launch id it put in the
+ * process environment; see `process-identity.ts`). An
  * app counts as running only when its pid file names a live process whose identity still
  * matches and the app's loopback port is held by that process's tree, so a run started by
  * another supervisor invocation is adopted instead of started twice, and a recycled pid is never
@@ -13,8 +14,10 @@
  * helper, checking the identity again immediately before every signal.
  *
  * Concurrency: inspection, start and pid file publication (and inspection plus stop) run under
- * a per-app lock file (`<pidFile>.lock`, created with `O_EXCL`). A lock whose owner process is
- * gone is taken over; a live owner makes the other supervisor fail with a clear message.
+ * a per-app lock file (`<pidFile>.lock`, published complete by temp file + `link`). A lock
+ * whose owner process is gone is taken over under a guard that removes only that exact stale
+ * lock (see `LocalEdgeKit_acquireSupervisorLock`); a live owner makes the other supervisor fail
+ * with a clear message.
  *
  * Files: pid and lock files are written inside the app's `cwd` through `safe-write.ts`
  * (no symlinks followed, atomic replace, 0600 files, 0700 folders); the log is opened for
@@ -154,6 +157,8 @@ export type LocalEdgeKit_SupervisorHost = {
         logRoot: string;
         /** Values set over the supervisor's env for this process. */
         env?: Readonly<Record<string, string>> | undefined;
+        /** Random id passed to the process as `LOCAL_EDGE_KIT_LAUNCH_ID` and recorded with its pid. */
+        launchId?: string | undefined;
     }): number;
     sleep(ms: number): Promise<void>;
     sleepSync(ms: number): void;
@@ -320,8 +325,30 @@ export type LocalEdgeKit_SupervisorLock = {
 };
 /**
  * Takes the per-app supervisor lock `<pidFile>.lock` inside the app's `cwd`. The lock file holds
- * the owner's pid and identity. A lock whose owner is gone (or is a recycled pid) is taken over
- * once; a live owner, or an owner without a readable identity, keeps it.
+ * the owner's pid, identity and a random 128-bit token. A lock whose owner is gone (or is a
+ * recycled pid) is taken over; a live owner, or an owner without a readable identity, keeps it.
+ *
+ * Why at most one owner:
+ * 1. Publication is atomic. `host.createExclusive` writes the complete text to a unique temp
+ *    file and `link()`s it to the lock path, which fails with EEXIST when a lock exists. A lock
+ *    is therefore never visible empty or half-written, and no two creations both succeed.
+ * 2. A lock file is removed only by its owner's `release` (which re-reads it and removes it
+ *    only when it holds the owner's token) or by a takeover. An owner cannot lose its lock while
+ *    it is alive, because a takeover needs the holder to be provably gone.
+ * 3. A takeover of the stale lock S first creates the guard `<lock>.takeover-<k>`, where `k`
+ *    is the SHA-256 of S's bytes, the same exclusive way, then re-reads the lock and removes it
+ *    only when its bytes are still exactly S. While the guard is held, S cannot be replaced: its
+ *    owner is dead, only the guard holder may remove it, and nothing can be published over an
+ *    existing file. So the removal removes S and never a successor. A contender that judged S
+ *    stale too, but gets the guard only after S was removed, finds other bytes and removes
+ *    nothing. Every lock carries a random token (an older version's lock carries the identity
+ *    of a process that is now gone), so no later lock has S's bytes.
+ * 4. A guard whose holder died is itself stale and is taken over by the same rule, under the
+ *    guard `<guard>.takeover-<k>` (at most four levels deep).
+ * 5. A lock without a pid and a complete identity (empty or partial) is never removed
+ *    automatically: an older version, which wrote after an exclusive open, could still be
+ *    writing it. The caller gets an error that says to remove it by
+ *    hand once no supervisor runs.
  *
  * @param app - The app; `pidFile` and `cwd` locate the lock.
  * @param host - Supervisor host.

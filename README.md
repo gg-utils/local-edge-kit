@@ -110,8 +110,13 @@ never started, stopped or signalled. `locations` adds extra path routes for the 
 | `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
 | `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
 
-When `up` starts an app it writes the pid file with the process's identity: owner uid, start
-time and command line. An app is adopted only when its pid file names a live process whose
+When `up` starts an app it gives the process a random launch id in its environment
+(`LOCAL_EDGE_KIT_LAUNCH_ID`) and writes the pid file with the process's identity: owner uid,
+start time, command line and that launch id. `ps` shows start times to the second only; the
+launch id tells apart a pid reused within the same second by the same user and command line.
+It is read back from `/proc/<pid>/environ` on Linux and from `ps -E` on macOS. Where the
+environment cannot be read (recent macOS shows none in `ps -E`), the check falls back to uid,
+start time and command line, so same-second reuse there is not detected. An app is adopted only when its pid file names a live process whose
 identity still matches and whose process tree holds the port, so a run started by an earlier
 `up` is never started twice and a recycled pid is never adopted. A pid file without an identity
 (written by another tool) is shown as `unverified`; such a process is never adopted or
@@ -135,8 +140,11 @@ Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The S
 is never changed by the supervisor.
 
 `up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
-publish the pid file, so two supervisors cannot start the same app twice. A lock left by a
-process that is gone is taken over. Pid, lock and log files must sit inside the app's `cwd`.
+publish the pid file, so two supervisors cannot start the same app twice. A lock file appears
+only complete (temp file, then `link`). A lock left by a process that is gone is taken over
+under a guard that removes only that exact stale lock, so a successor's lock is never removed.
+An empty or partial lock (an older version may still be writing it) is never removed
+automatically: remove it by hand once no supervisor runs. Pid, lock and log files must sit inside the app's `cwd`.
 They are written without following symlinks: folders are walked one level at a time and checked
 again after the open and before the rename, pid files are replaced atomically, and new files are
 `0600` and new folders `0700`. The `cwd` and its ancestors are trusted; folders below it must

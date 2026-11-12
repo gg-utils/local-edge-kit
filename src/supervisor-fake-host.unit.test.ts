@@ -18,6 +18,8 @@ export type FakeProcess = {
   uid?: number;
   start?: string;
   command?: string;
+  /** Launch id the fake host reads from the process environment; leave out for "cannot read". */
+  launchId?: string | null;
 };
 
 /** Identity the fake host reports for a process seeded with defaults. */
@@ -33,7 +35,7 @@ export function fakePidFile(pid: number, overrides: Partial<LocalEdgeKit_Process
 /** Fake host plus the recorded effects tests assert on. The supervisor itself is pid 1000. */
 export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
-  spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[];
+  spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined; launchId?: string | undefined }[];
   commands: string[][];
   dirs: string[];
   files: Map<string, string>;
@@ -54,11 +56,17 @@ export function fakeHost(seed: {
     command: string,
     args: readonly string[],
   ) => { status: number | null; stdout: string; stderr: string } | undefined;
+  /** Shares files and processes with other fake hosts, to model concurrent supervisors. */
+  shared?: { files: Map<string, string>; processes: Map<number, FakeProcess & { alive: boolean }> };
+  /** This supervisor's own pid. Default 1000. */
+  ownPid?: number;
+  /** Called after every read with the path and the text returned; used to interleave contenders. */
+  onRead?: (filePath: string, text: string | null) => void;
 } = {}): FakeSupervisorHost {
-  const files = new Map(Object.entries(seed.files ?? {}));
-  const processes = new Map((seed.processes ?? []).map((p) => [p.pid, { ...p, alive: true }]));
+  const files = seed.shared?.files ?? new Map(Object.entries(seed.files ?? {}));
+  const processes = seed.shared?.processes ?? new Map((seed.processes ?? []).map((p) => [p.pid, { ...p, alive: true }]));
   const signals: { pid: number; signal: string | 0 }[] = [];
-  const spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[] = [];
+  const spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined; launchId?: string | undefined }[] = [];
   const commands: string[][] = [];
   const dirs: string[] = [];
   let clock = 0;
@@ -72,7 +80,11 @@ export function fakeHost(seed: {
     files,
     processes,
     lockAttempts,
-    readText: (filePath) => files.get(filePath) ?? null,
+    readText: (filePath) => {
+      const text = files.get(filePath) ?? null;
+      seed.onRead?.(filePath, text);
+      return text;
+    },
     writeText: (filePath, text) => void files.set(filePath, text),
     ensureDir: (dirPath) => void dirs.push(dirPath),
     runCommand: (command, args) => {
@@ -95,9 +107,16 @@ export function fakeHost(seed: {
         return fakeIdentity(1000);
       }
       const p = processes.get(pid);
-      return p?.alive ? fakeIdentity(pid, { ...(p.uid === undefined ? {} : { uid: p.uid }), ...(p.start === undefined ? {} : { startedAt: p.start }), ...(p.command === undefined ? {} : { command: p.command }) }) : null;
+      return p?.alive
+        ? fakeIdentity(pid, {
+            ...(p.uid === undefined ? {} : { uid: p.uid }),
+            ...(p.start === undefined ? {} : { startedAt: p.start }),
+            ...(p.command === undefined ? {} : { command: p.command }),
+            ...(p.launchId === undefined ? {} : { launchId: p.launchId }),
+          })
+        : null;
     },
-    ownPid: () => 1000,
+    ownPid: () => seed.ownPid ?? 1000,
     processGroupOf: (pid) => (processes.get(pid)?.alive ? (processes.get(pid)?.group ?? null) : null),
     parentOf: (pid) => processes.get(pid)?.parent ?? null,
     ownProcessGroup: () => seed.ownGroup ?? 1,
@@ -121,7 +140,7 @@ export function fakeHost(seed: {
     spawnDetached: (options) => {
       nextPid += 1;
       spawned.push(options);
-      processes.set(nextPid, { pid: nextPid, group: nextPid, alive: true });
+      processes.set(nextPid, { pid: nextPid, group: nextPid, alive: true, ...(options.launchId === undefined ? {} : { launchId: options.launchId }) });
       seed.onSpawn?.(host, nextPid);
       return nextPid;
     },
