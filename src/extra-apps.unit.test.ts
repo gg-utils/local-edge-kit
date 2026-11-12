@@ -10,7 +10,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -22,11 +22,12 @@ import {
   LocalEdgeKit_createExtraAppsFileSource,
   LocalEdgeKit_mergeExtraApps,
   LocalEdgeKit_parseExtraAppsJson,
+  LOCAL_EDGE_KIT_RESERVED_APP_IDS,
 } from "./extra-apps.js";
 import { LocalEdgeKit_readFileSafe } from "./safe-write.js";
 
 function scratch(): string {
-  return mkdtempSync(path.join(os.tmpdir(), "kit-extra-apps-"));
+  return realpathSync(mkdtempSync(path.join(os.tmpdir(), "kit-extra-apps-")));
 }
 
 const hostnames: LocalEdgeCore_ExposureHostnamesConfig = {
@@ -89,7 +90,7 @@ void test("file source: missing file is empty, real file loads, symlinks and out
 });
 
 void test("parse: shape problems are listed together with the source name", () => {
-  assert.throws(() => LocalEdgeKit_parseExtraAppsJson("{", "src.json"), /src\.json: not JSON/);
+  assert.throws(() => LocalEdgeKit_parseExtraAppsJson("{", "src.json"), /src\.json: not valid JSON \(line 1, column 2\)/);
   assert.throws(() => LocalEdgeKit_parseExtraAppsJson("[]", "src.json"), /expected an object with an "apps" array/);
   const bad = JSON.stringify({
     apps: [
@@ -145,4 +146,111 @@ void test("merge: duplicate hostnames and ids across sources are refused by name
       }),
     /duplicate app id play: a and b/,
   );
+});
+
+const MARKER = "TOPSECRETMARKER";
+
+void test("file source: a file others can write is refused with the path and the rule, never the content", () => {
+  const root = scratch();
+  const file = path.join(root, "apps.json");
+  writeFileSync(file, playJson, { mode: 0o600 });
+  for (const mode of [0o666, 0o620, 0o602]) {
+    chmodSync(file, mode);
+    assert.throws(
+      () => LocalEdgeKit_createExtraAppsFileSource({ filePath: file }).load(),
+      (error: Error) =>
+        error.message.startsWith("local-edge-kit-safe-read-unsafe-mode:") &&
+        error.message.includes(file) &&
+        error.message.includes("0600") &&
+        !error.message.includes("play.m1"),
+    );
+  }
+  chmodSync(file, 0o600);
+  assert.equal(LocalEdgeKit_createExtraAppsFileSource({ filePath: file }).load().length, 2);
+  chmodSync(root, 0o777);
+  assert.throws(() => LocalEdgeKit_createExtraAppsFileSource({ filePath: file }).load(), /local-edge-kit-safe-read-unsafe-mode: folder /);
+});
+
+void test("parse: a syntax error gives a fixed message and the position, never file content", () => {
+  for (const text of [`${MARKER}`, `{"apps": [ ${MARKER} ]}`, `{\n  "apps" ${MARKER}`, `{"${MARKER}": }`]) {
+    assert.throws(
+      () => LocalEdgeKit_parseExtraAppsJson(text, "src.json"),
+      (error: Error) =>
+        /^local-edge-kit-extra-apps-invalid: src\.json: not valid JSON \((line \d+, column \d+|position not reported)\)$/.test(error.message) &&
+        !error.message.includes("TOPSECRET"),
+    );
+  }
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson(`{\n  "apps" ${MARKER}`, "src.json"),
+    /not valid JSON \(line 2, column \d+\)/,
+  );
+});
+
+void test("parse: unknown keys are refused at the top level, the app level and the location level", () => {
+  const app = { id: "play", host: "play.m1.example.test", upstream: "127.0.0.1:5174" };
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson(JSON.stringify({ apps: [{ ...app, upstreamhost: "127.0.0.1:5174" }] }), "src.json"),
+    /play: unknown key "upstreamhost"/,
+  );
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson(JSON.stringify({ apps: [{ ...app, command: "rm -rf x" }] }), "src.json"),
+    /play: unknown key "command"/,
+  );
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson(JSON.stringify({ apps: [{ ...app, locations: [{ path: "/a", upstream: "127.0.0.1:2", upstreampath: "/x" }] }] }), "src.json"),
+    /play: locations\[0\]: unknown key "upstreampath"/,
+  );
+  assert.throws(() => LocalEdgeKit_parseExtraAppsJson(JSON.stringify({ apps: [], appz: [] }), "src.json"), /top level: unknown key "appz"/);
+  // A key that is not a short plain token is not echoed; its number in the object is given instead.
+  const odd = `{"apps":[{"id":"play","host":"play.m1.example.test","upstream":"127.0.0.1:5174","${MARKER} with spaces; and more":1}]}`;
+  assert.throws(
+    () => LocalEdgeKit_parseExtraAppsJson(odd, "src.json"),
+    (error: Error) => /play: unknown key \(key number 4 in the object\)/.test(error.message) && !error.message.includes("TOPSECRET"),
+  );
+  // Every known key still passes.
+  assert.equal(LocalEdgeKit_parseExtraAppsJson(playJson, "src.json").length, 2);
+});
+
+void test("merge: hosts compare after lowercasing and dropping a trailing dot, and the error names both sources", () => {
+  const source = (name: string, json: string): LocalEdgeKit_ExtraAppsSource => ({ name, load: () => LocalEdgeKit_parseExtraAppsJson(json, name) });
+  const one = (id: string, host: string) => JSON.stringify({ apps: [{ id, host, upstream: "127.0.0.1:9" }] });
+  assert.throws(
+    () =>
+      LocalEdgeKit_mergeExtraApps({
+        apps: [],
+        sources: [source("a", one("first", "a.example.test")), source("b", one("second", "A.Example.test."))],
+        hostnames,
+      }),
+    /duplicate hostname a\.example\.test: first \(a\) and second \(b\)/,
+  );
+  assert.throws(
+    () =>
+      LocalEdgeKit_mergeExtraApps({
+        apps: [{ id: "web", enabled: true, external: true, localPort: 3210, healthPath: "/", host: "Web.Proj.Example.test." }],
+        sources: [source("machine", one("other", "web.proj.example.test"))],
+        hostnames,
+      }),
+    /duplicate hostname web\.proj\.example\.test: web \(project\) and other \(machine\)/,
+  );
+  assert.throws(
+    () =>
+      LocalEdgeKit_mergeExtraApps({
+        apps: [{ id: "Play", enabled: true, external: true, localPort: 3210, healthPath: "/", host: "p1.example.test" }],
+        sources: [source("b", one("play", "p2.example.test"))],
+        hostnames,
+      }),
+    /duplicate app id play: project and b/,
+  );
+});
+
+void test("merge: the id router is reserved for the supervisor and refused with a named error", () => {
+  const source: LocalEdgeKit_ExtraAppsSource = {
+    name: "machine",
+    load: () => LocalEdgeKit_parseExtraAppsJson(JSON.stringify({ apps: [{ id: "router", host: "r.m1.example.test", upstream: "127.0.0.1:9" }] }), "machine"),
+  };
+  assert.throws(
+    () => LocalEdgeKit_mergeExtraApps({ apps: [], sources: [source], hostnames }),
+    /^Error: local-edge-kit-extra-apps-reserved-id: machine: app id router is reserved/,
+  );
+  assert.deepEqual(LOCAL_EDGE_KIT_RESERVED_APP_IDS, ["router"]);
 });
