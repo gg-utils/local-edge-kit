@@ -162,7 +162,7 @@
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {
-    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#154c25e49ff3f197aa421d44c53eb12d7fc0fde4",
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#v0.3.0",
     "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#v0.2.0",
     "ink": "6.8.0",
     "react": "19.3.1"
