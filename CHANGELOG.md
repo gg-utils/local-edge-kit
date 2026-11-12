@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+Adds the `hostnames` router backend config (a supervised nginx with SNI routing, activation confirmed by a marker hash, rollback on failure) and hardens the app supervisor.
 
 Compatibility changes in the app supervisor:
 
