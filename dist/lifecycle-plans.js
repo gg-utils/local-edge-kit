@@ -20,6 +20,7 @@ import path from "node:path";
 import { LocalEdgeCore_buildDockerComposeDownCommand, LocalEdgeCore_buildDockerComposeUpDetachedCommand, LocalEdgeCore_commandExists, LocalEdgeCore_extractShellCommandBinary, LocalEdgeCore_formatHttpsUrl, LocalEdgeCore_isCustomLoopbackHost, LocalEdgeCore_isPortListening, LocalEdgeCore_isTruthy, LocalEdgeCore_logColorEnabled, LocalEdgeCore_logError, LocalEdgeCore_logInfo, LocalEdgeCore_logWarn, LocalEdgeCore_loopbackAliasExists, LocalEdgeCore_mkcertTrustDetected, LocalEdgeCore_resolveTlsCertPath, LocalEdgeCore_shouldFailHard, LocalEdgeCore_slugifySegment, LocalEdgeCore_terminateListenersOnPort, LocalEdgeCore_validatePositiveInteger, LocalEdgeCore_writeArtifact, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_resolveProjectRoot } from "./env.js";
 import { LocalEdgeKit_getRuntimeMethod, LocalEdgeKit_resolveRuntimeConfig, } from "./runtime-config.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 function LocalEdgeKit_lifecycleEnvKeyForMethod(options) {
     const configured = options.configuredNames?.[options.method];
     if (configured !== undefined && configured.length > 0) {
@@ -394,7 +395,7 @@ export function LocalEdgeKit_resolveStartRequest(options) {
         return {
             ok: false,
             exitCode: 2,
-            stderrLine: `[local-edge:start] Unsupported --method '${method}'.\n`,
+            stderrLine: `[local-edge:start] Unsupported --method '${LocalEdgeKit_messageWord(method)}'.\n`,
         };
     }
     try {
@@ -1244,7 +1245,7 @@ function LocalEdgeKit_validateSetupTlsMode(options) {
         return undefined;
     }
     if (tlsMode !== "self-signed" && tlsMode !== "provided") {
-        loggers.warn(`Unsupported LOCAL_EDGE_TLS_MODE='${tlsMode}'.`);
+        loggers.warn("Unsupported LOCAL_EDGE_TLS_MODE value. Use 'mkcert', 'self-signed' or 'provided'.");
         if (strict) {
             return 1;
         }

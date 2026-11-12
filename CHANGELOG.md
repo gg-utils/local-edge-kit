@@ -35,8 +35,16 @@ Adds per-machine extra apps: route-only apps that are not part of the project co
   regard to case, and the id `router` is reserved (`local-edge-kit-extra-apps-reserved-id`).
 - **`status` shows a `SOURCE` column** (`project` for apps from the config), and `status --json`
   rows gain a `source` field.
-- **Core is pinned to `v0.4.0`** (exact hosts, `upstreamHost`, buffering, `readTimeout`,
-  per-location proxy).
+- **Core is pinned to `v0.4.1`** (exact hosts, `upstreamHost`, buffering, `readTimeout`,
+  per-location proxy from 0.4.0; error messages that never echo env values from 0.4.1).
+- **Kit messages never echo env values.** Like core 0.4.1, kit messages built from an env value
+  name the variable and the rule only: helper ports, unsupported or extra methods in the methods
+  list, `LOCAL_EDGE_TLS_MODE` and the launch method warning. Unknown legacy env key names are
+  listed at most five at a time and only when name-shaped, and a `--method` word is repeated only
+  when it is short and plain. Message texts changed accordingly.
+- **Clearer rollback note.** When `up` cannot identify the nginx it launched, the note now says the
+  router this run launched may still be running and that the process could not be identified as its
+  nginx, instead of calling an unidentified process "an nginx started by this run".
 
 ## 0.4.1
 

@@ -22,6 +22,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { LocalEdgeCore_isTruthy, LocalEdgeCore_validateRequestedMethod, } from "@gg-utils/local-edge-core";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 /** Resolves the effective project root, respecting a caller value and env override. */
 export function LocalEdgeKit_commandRuntimeResolveProjectRoot(options) {
     const env = options.env ?? process.env;
@@ -211,5 +212,5 @@ export function LocalEdgeKit_commandRuntimeValidateRequestedMethod(options) {
     if (typeof result === "string") {
         return result;
     }
-    throw new Error(`[${options.commandLabel}] Unsupported --method '${options.method}'.`);
+    throw new Error(`[${options.commandLabel}] Unsupported --method '${LocalEdgeKit_messageWord(options.method)}'.`);
 }

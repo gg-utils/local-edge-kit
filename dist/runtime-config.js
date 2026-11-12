@@ -15,6 +15,7 @@
 import path from "node:path";
 import { LocalEdgeCore_isSupportedMethod, LocalEdgeCore_resolveDeveloperSlug, LocalEdgeCore_resolveEnvSlug, LocalEdgeCore_resolveGeneratedDirBase, LocalEdgeCore_resolveNginxDockerComposePath, LocalEdgeCore_resolveNginxDockerListenHost, LocalEdgeCore_resolveNginxDockerPort, LocalEdgeCore_slugifySegment, } from "@gg-utils/local-edge-core";
 import { LocalEdgeKit_resolveProjectRoot } from "./env.js";
+import { LocalEdgeKit_messageEnvNames } from "./safe-message.js";
 function LocalEdgeKit_generatedDirEnvName(config) {
     return config.env?.generatedDirEnvName ?? "LOCAL_EDGE_GENERATED_DIR";
 }
@@ -52,13 +53,13 @@ function LocalEdgeKit_parseConfiguredMethods(options) {
         supportedMethods: options.supportedMethods,
     }));
     if (invalidMethods.length > 0) {
-        throw new Error(`[local-edge:config] Unsupported ${options.methodsEnvName} value(s): ${invalidMethods.join(", ")}.`);
+        throw new Error(`[local-edge:config] ${options.methodsEnvName} has ${String(invalidMethods.length)} unsupported method(s). Supported: ${options.supportedMethods.join(", ")}.`);
     }
     if (uniqueMethods.length === 0) {
         throw new Error(`[local-edge:config] ${options.methodsEnvName} must contain at least one method.`);
     }
     if (options.singleMethodMode && uniqueMethods.length !== 1) {
-        throw new Error(`[local-edge:config] ${options.methodsEnvName} must contain exactly one method in single-method mode. Received '${uniqueMethods.join(",")}'.`);
+        throw new Error(`[local-edge:config] ${options.methodsEnvName} must contain exactly one method in single-method mode; it has ${String(uniqueMethods.length)}.`);
     }
     return uniqueMethods;
 }
@@ -142,7 +143,7 @@ export function LocalEdgeKit_resolveRuntimeConfig(options) {
     const primaryMethodEnvName = LocalEdgeKit_primaryMethodEnvName(options.config);
     const unsupportedLegacyEnvKeys = LocalEdgeKit_findUnsupportedLegacyKeys(env);
     if (unsupportedLegacyEnvKeys.length > 0) {
-        throw new Error(`[local-edge:config] Unsupported legacy host-managed local-edge env keys detected. Remove: ${unsupportedLegacyEnvKeys.sort().join(", ")}.`);
+        throw new Error(`[local-edge:config] Unsupported legacy host-managed local-edge env keys detected. Remove: ${LocalEdgeKit_messageEnvNames(unsupportedLegacyEnvKeys.sort())}.`);
     }
     const configuredMethods = LocalEdgeKit_parseConfiguredMethods({
         rawMethodsCsv: env[methodsEnvName],

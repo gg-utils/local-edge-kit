@@ -365,7 +365,7 @@ export function LocalEdgeKit_routerUp(options) {
         }
         if (steps.unidentified) {
             const { pid } = steps.unidentified;
-            const text = `an nginx started by this run may still be running${pid === null ? " (its pid is unknown)" : ` (pid ${String(pid)})`}; its identity could not be confirmed, so it was not stopped and not recorded as active. Check ${nginx.pidPath} and the process list for an nginx master started with -c ${nginx.confPath}, and stop it with SIGQUIT if it is yours; the next up adopts a verified one and reloads it`;
+            const text = `the router this run launched may still be running${pid === null ? " (its pid is unknown)" : ` (pid ${String(pid)})`}, but that process could not be identified as its nginx (the pid may now belong to another process), so it was not stopped and not recorded as active. Check ${nginx.pidPath} and the process list for an nginx master started with -c ${nginx.confPath}, and stop it with SIGQUIT if it is yours; the next up adopts a verified one and reloads it`;
             notes.push(text);
             errors.push(text);
         }
@@ -470,6 +470,11 @@ export function LocalEdgeKit_routerUp(options) {
      * After a throw inside that window, tries once more to identify the started nginx (pid file,
      * identity, nginx-master-for-this-config check). Identified: the verified-quit path can stop it.
      * Otherwise it is reported as possibly still running, with the pid when it is known.
+     *
+     * @param known - The pid already read from nginx's pid file in this run, or `null` to read it again.
+     * @returns `{ unconfirmed, stop: true }` when the pid is an nginx master for this config, so the
+     *   rollback may stop it with a verified signal; otherwise `{ unidentified: { pid } }`, so the
+     *   rollback signals nothing and reports it. Never throws: a failed read leaves it unidentified.
      */
     const identifyStarted = (known) => {
         let pid = known;

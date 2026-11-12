@@ -141,7 +141,7 @@ and nothing is recorded as active, so the next `up` tries again. Each rollback s
 not active, restore or remove the config) runs even when an earlier one failed, and the failures are
 listed in the failed result's `errors`; a host call that throws while the config may already be
 replaced (clearing the old marker socket, polling the marker, reading the new pid) is rolled back the
-same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says an nginx started by this run may still be running (with its pid when known) and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
+same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says the router this run launched may still be running (with its pid when known), that the process could not be identified as its nginx, and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
 be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
 place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or

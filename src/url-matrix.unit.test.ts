@@ -118,6 +118,6 @@ void test("LocalEdgeKit_resolveRuntimeConfig rejects unsupported configured meth
         },
         projectRoot: "/tmp/example-project",
       }),
-    /Unsupported LOCAL_EDGE_METHODS value\(s\): unknown-method\./,
+    /LOCAL_EDGE_METHODS has 1 unsupported method\(s\)\. Supported: nginx-docker\./,
   );
 });

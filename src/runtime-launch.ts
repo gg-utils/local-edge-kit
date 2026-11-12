@@ -2619,7 +2619,7 @@ function LocalEdgeKit_resolveRuntimeLaunchMethod(options: {
   }
   if (!options.supportedMethods.includes(method)) {
     warningLines.push(
-      `[local] WARNING: Unsupported ${options.envName}='${method}'. Using '${options.fallbackMethod}'.`,
+      `[local] WARNING: Unsupported ${options.envName} value. Using '${options.fallbackMethod}'.`,
     );
     return {
       method: options.fallbackMethod,

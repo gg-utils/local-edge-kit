@@ -902,12 +902,12 @@ for (const call of ["identity read", "pid file read"] as const) {
     assert.equal(result.ok, false);
     assert.equal(result.action, "failed");
     assert.match(result.message, /activation was interrupted/);
-    assert.match(result.message, new RegExp(`an nginx started by this run may still be running \\(${pid}\\)`));
+    assert.match(result.message, new RegExp(`the router this run launched may still be running \\(${pid}\\), but that process could not be identified as its nginx`));
     assert.match(result.message, /Check \/st\/nginx\/nginx\.pid and the process list/);
     assert.match(result.message, /previous config restored/);
     assert.equal(result.errors?.length, 2);
     assert.equal(result.errors?.[0], "a host call failed: ps broke");
-    assert.match(result.errors?.[1] ?? "", /^an nginx started by this run may still be running/);
+    assert.match(result.errors?.[1] ?? "", /^the router this run launched may still be running/);
     assert.deepEqual(host.signals, []);
     assert.equal(host.processes.get(500)?.alive, true);
     assert.equal(host.files.has(STATE_FILE), false);
