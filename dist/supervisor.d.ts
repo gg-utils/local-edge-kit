@@ -56,6 +56,8 @@ export type LocalEdgeKit_SupervisedApp = {
         localPort: number;
         upstreamPath?: string | undefined;
     }[] | undefined;
+    /** Hostname pattern for this app only (name-based backends), for a host under another label. */
+    hostnameTemplate?: string | undefined;
     /** HTTP path that must answer 2xx/3xx for the app to count as healthy. */
     healthPath: string;
     /** Optional second HTTP path that must answer before the app counts as ready. */

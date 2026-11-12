@@ -53,6 +53,7 @@ export function LocalEdgeKit_buildExposureManifest(config) {
             edgePort: app.edgePort,
             edgeName: app.edgeName,
             locations: app.locations,
+            hostnameTemplate: app.hostnameTemplate,
         })),
     };
 }

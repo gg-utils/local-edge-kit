@@ -124,6 +124,7 @@ export function LocalEdgeKit_buildExposureManifest(
       edgePort: app.edgePort,
       edgeName: app.edgeName,
       locations: app.locations,
+      hostnameTemplate: app.hostnameTemplate,
     })),
   };
 }

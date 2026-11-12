@@ -271,3 +271,17 @@ void test("down with hostnames quits nginx and never signals external apps", asy
   assert.match(stdout.text(), /preview\s+skipped\s+external/);
   assert.ok(!host.signals.some((s) => Math.abs(s.pid) === 31));
 });
+
+void test("an app's own hostname pattern reaches the router config", async () => {
+  const dashConfig: LocalEdgeKit_SupervisorConfig = {
+    ...hostConfig,
+    exposure: { ...hostConfig.exposure, hostnames: { ...hostnames, extraWildcardTemplates: ["*.m1.{rootZone}"] } },
+    apps: [
+      ...hostConfig.apps,
+      { id: "dash", enabled: true, external: true, localPort: 3081, healthPath: "/", hostnameTemplate: "{label}.m1.{rootZone}" },
+    ],
+  };
+  const host = nginxHost({ files: { ...certFiles, "/w/auth/p": "10" }, processes: [{ pid: 10, group: 10, port: 4300 }] });
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: dashConfig, host, stdout: capture().writer, stderr: capture().writer }), 0);
+  assert.match(host.files.get("/st/nginx/nginx.conf") ?? "", /server_name dash\.m1\.example\.test;/);
+});
