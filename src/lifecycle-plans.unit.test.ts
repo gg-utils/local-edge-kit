@@ -419,7 +419,7 @@ void test("LocalEdgeKit_resolveStopRequest warns and defaults invalid timeouts",
     assert.equal(result.timeoutSeconds, 20);
     assert.equal(
       result.timeoutWarningLine,
-      "LOCAL_EDGE_STOP_TIMEOUT_SECONDS must be numeric. Current value='bad'.",
+      "LOCAL_EDGE_STOP_TIMEOUT_SECONDS must be a whole number of at least 1.",
     );
   }
 });
@@ -638,7 +638,7 @@ void test("LocalEdgeKit_resolveSetupRequest builds a host-operation-free setup p
     assert.deepEqual(result.missingEnvWarningLines, ["methods missing"]);
     assert.equal(
       result.startTimeoutWarningLine,
-      "LOCAL_EDGE_START_TIMEOUT_SECONDS must be numeric. Current value='bogus'.",
+      "LOCAL_EDGE_START_TIMEOUT_SECONDS must be a whole number of at least 1.",
     );
     assert.deepEqual(result.envOverlayValidation, {
       command: "npx",
@@ -1111,4 +1111,52 @@ void test("LocalEdgeKit_runDoctorLifecycle returns strict failure from delegated
     "[local-edge:doctor] WARNING config failed (exit=1).\n",
     "[local-edge:doctor] Summary status=failed domains=config\n",
   ]);
+});
+
+void test("no echo: an unsupported LOCAL_EDGE_TLS_MODE is named, its value never repeated", () => {
+  const marker = "ECHOMARK7";
+  const warnings: string[] = [];
+  const exitCode = LocalEdgeKit_runSetupLifecycle({
+    config: exampleConfig,
+    env: {
+      EXAMPLE_DEVELOPER: "ada",
+      EXAMPLE_METHODS: "nginx-docker",
+      LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD: "nginx-docker",
+      LOCAL_EDGE_TLS_MODE: marker,
+    },
+    executeHostCommandPlan: () => 0,
+    hooks: {
+      commandExists: () => true,
+      loopbackAliasExists: () => true,
+      mkcertTrustDetected: () => true,
+      writeArtifact: () => undefined,
+    },
+    loggers: {
+      error: () => undefined,
+      info: () => undefined,
+      warn: (line) => {
+        warnings.push(line);
+      },
+    },
+    now: () => new Date("2026-05-20T00:00:00.000Z"),
+    projectRoot: "/tmp/example",
+    stdout: () => undefined,
+  });
+  assert.equal(exitCode, 0);
+  assert.deepEqual(warnings, ["Unsupported LOCAL_EDGE_TLS_MODE value. Use 'mkcert', 'self-signed' or 'provided'."]);
+});
+
+void test("no echo: an unsupported start method is repeated only when it is a short plain word", () => {
+  const start = (method: string): string => {
+    const result = LocalEdgeKit_resolveStartRequest({
+      config: exampleConfig,
+      projectRoot: "/tmp/example",
+      env: { LOCAL_EDGE_STARTUP_CLI_RESOLVED_METHOD: method },
+    });
+    assert.equal(result.ok, false);
+    return result.ok ? "" : result.stderrLine;
+  };
+  assert.equal(start("bogus"), "[local-edge:start] Unsupported --method 'bogus'.\n");
+  assert.equal(start("ECHOMARK7 token=x"), "[local-edge:start] Unsupported --method '<17 characters>'.\n");
+  assert.equal(start(`ECHOMARK7${"x".repeat(60)}`), "[local-edge:start] Unsupported --method '<69 characters>'.\n");
 });

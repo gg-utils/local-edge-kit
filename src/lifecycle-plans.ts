@@ -49,6 +49,7 @@ import {
   LocalEdgeKit_resolveRuntimeConfig,
   type LocalEdgeKit_RuntimeNginxDockerMethod,
 } from "./runtime-config.js";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 
 /** Fully resolved shell variables for an nginx-docker start wrapper. */
 export type LocalEdgeKit_StartNginxDockerPlan = {
@@ -980,7 +981,7 @@ export function LocalEdgeKit_resolveStartRequest(options: {
     return {
       ok: false,
       exitCode: 2,
-      stderrLine: `[local-edge:start] Unsupported --method '${method}'.\n`,
+      stderrLine: `[local-edge:start] Unsupported --method '${LocalEdgeKit_messageWord(method)}'.\n`,
     };
   }
 
@@ -2056,7 +2057,7 @@ function LocalEdgeKit_validateSetupTlsMode(options: {
     return undefined;
   }
   if (tlsMode !== "self-signed" && tlsMode !== "provided") {
-    loggers.warn(`Unsupported LOCAL_EDGE_TLS_MODE='${tlsMode}'.`);
+    loggers.warn("Unsupported LOCAL_EDGE_TLS_MODE value. Use 'mkcert', 'self-signed' or 'provided'.");
     if (strict) {
       return 1;
     }

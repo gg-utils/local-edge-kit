@@ -22,8 +22,10 @@
  * (the umask can only remove bits). An existing file keeps its mode.
  * Flow: lexical check -> segment walk (lstat, mkdir one level, record dev/ino) -> open
  * O_NOFOLLOW -> recheck chain + fd identity -> write + fsync -> recheck chain -> rename -> dir fsync.
- * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, the same
- * `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are read.
+ * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, a
+ * non-blocking `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are
+ * read, then refuse a file or folder that group or others can write or that another user owns,
+ * and a file over the size limit.
  *
  * @example
  * ```typescript
@@ -48,7 +50,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -67,6 +69,28 @@ export type LocalEdgeKit_SafeWriteHooks = {
   beforeRename?: (() => void) | undefined;
 };
 
+/** Largest file `LocalEdgeKit_readFileSafe` reads by default: 256 KiB. */
+export const LOCAL_EDGE_KIT_SAFE_READ_MAX_BYTES = 256 * 1024;
+
+/** Options for `LocalEdgeKit_readFileSafe`. */
+export type LocalEdgeKit_SafeReadOptions = {
+  /** Folder the file must stay inside. The root itself may be a symlink. */
+  root: string;
+  /** Largest file accepted, checked by `fstat` and again while reading. Default 256 KiB. */
+  maxBytes?: number | undefined;
+  /** Owner the file must have. Default: the current user. Test seam. */
+  uid?: number | undefined;
+  /** Owner the containing folder must have. Default: `uid`. Test seam. */
+  folderUid?: number | undefined;
+  /** Test seams. Leave out in real use. */
+  hooks?: {
+    /** After the path checks, before the file is opened. */
+    beforeOpen?: (() => void) | undefined;
+    /** After the descriptor was checked with `fstat`, before the bytes are read. */
+    afterStat?: (() => void) | undefined;
+  } | undefined;
+};
+
 /** Options shared by the careful writers. */
 export type LocalEdgeKit_SafeWriteOptions = {
   /** Folder the target must stay inside. The root and its ancestors are trusted. */
@@ -80,7 +104,7 @@ export type LocalEdgeKit_SafeWriteOptions = {
 };
 
 /** One folder of a checked chain: its path and the identity it had when it was checked. */
-type LocalEdgeKit_CheckedDir = { dir: string; dev: number; ino: number };
+type LocalEdgeKit_CheckedDir = { dir: string; dev: number; ino: number; mode?: number; uid?: number };
 
 /** A target whose folders were walked and checked. */
 type LocalEdgeKit_CheckedTarget = { target: string; chain: LocalEdgeKit_CheckedDir[] };
@@ -192,7 +216,7 @@ function LocalEdgeKit_walkDirsForRead(realRoot: string, relativeDir: string): Lo
   if (!rootStats.isDirectory()) {
     throw LocalEdgeKit_safeReadError("not-a-folder", `${realRoot} is not a folder`);
   }
-  const chain: LocalEdgeKit_CheckedDir[] = [{ dir: realRoot, dev: rootStats.dev, ino: rootStats.ino }];
+  const chain: LocalEdgeKit_CheckedDir[] = [{ dir: realRoot, dev: rootStats.dev, ino: rootStats.ino, mode: rootStats.mode, uid: rootStats.uid }];
   let current = realRoot;
   for (const segment of relativeDir.split(path.sep).filter((part) => part !== "" && part !== ".")) {
     current = path.join(current, segment);
@@ -206,33 +230,100 @@ function LocalEdgeKit_walkDirsForRead(realRoot: string, relativeDir: string): Lo
     if (!stats.isDirectory()) {
       throw LocalEdgeKit_safeReadError("not-a-folder", `${current} is not a folder`);
     }
-    chain.push({ dir: current, dev: stats.dev, ino: stats.ino });
+    chain.push({ dir: current, dev: stats.dev, ino: stats.ino, mode: stats.mode, uid: stats.uid });
   }
   return chain;
 }
 
+/** Owner every file and folder read here must have; undefined where the platform has no uids. */
+function LocalEdgeKit_currentUid(): number | undefined {
+  return typeof process.getuid === "function" ? process.getuid() : undefined;
+}
+
+/**
+ * Refuses a folder that another user could change: owned by someone else, or writable by group
+ * or others. A sticky bit does not excuse it; the folder holding the file must be private.
+ */
+function LocalEdgeKit_assertPrivateFolder(entry: LocalEdgeKit_CheckedDir, uid: number | undefined): void {
+  if (process.platform === "win32") {
+    return;
+  }
+  if (uid !== undefined && entry.uid !== undefined && entry.uid !== uid) {
+    throw LocalEdgeKit_safeReadError("unsafe-owner", `folder ${entry.dir} is not owned by the current user; the folder must be owned by you`);
+  }
+  if (entry.mode !== undefined && (entry.mode & 0o022) !== 0) {
+    throw LocalEdgeKit_safeReadError(
+      "unsafe-mode",
+      `folder ${entry.dir} is writable by group or others (mode ${(entry.mode & 0o777).toString(8)}); use 0700`,
+    );
+  }
+}
+
+/** Refuses a file owned by someone else or writable by group or others. */
+function LocalEdgeKit_assertPrivateFile(stats: Stats, filePath: string, uid: number | undefined): void {
+  if (process.platform === "win32") {
+    return;
+  }
+  if (uid !== undefined && stats.uid !== uid) {
+    throw LocalEdgeKit_safeReadError("unsafe-owner", `${filePath} is not owned by the current user; the file must be owned by you`);
+  }
+  if ((stats.mode & 0o022) !== 0) {
+    throw LocalEdgeKit_safeReadError(
+      "unsafe-mode",
+      `${filePath} is writable by group or others (mode ${(stats.mode & 0o777).toString(8)}); use 0600`,
+    );
+  }
+}
+
+/** Reads at most `maxBytes` from `fd`; throws when the file turns out to be longer. */
+function LocalEdgeKit_readBounded(fd: number, filePath: string, maxBytes: number): string {
+  const buffer = Buffer.allocUnsafe(maxBytes + 1);
+  let total = 0;
+  for (;;) {
+    const count = readSync(fd, buffer, total, buffer.length - total, null);
+    if (count === 0) {
+      break;
+    }
+    total += count;
+    if (total > maxBytes) {
+      throw LocalEdgeKit_safeReadError("too-large", `${filePath} grew past the ${String(maxBytes)}-byte limit while reading`);
+    }
+  }
+  return buffer.toString("utf8", 0, total);
+}
+
 /**
  * Reads a UTF-8 file inside `root` with the writers' containment rules: lexical containment, a
- * segment walk that refuses symlinked folders, no symlinked target, an `O_NOFOLLOW` open, and a
- * recheck of the folder chain and the descriptor's identity before reading.
+ * segment walk that refuses symlinked folders, no symlinked target, a non-blocking `O_NOFOLLOW`
+ * open, a recheck of the folder chain and the descriptor's identity, and then `fstat` of the
+ * descriptor: it must be a regular file owned by the current user and not writable by group or
+ * others, in a folder that is owned by the current user and not writable by group or others (a
+ * sticky bit does not excuse a writable folder), and no larger than `maxBytes`. The bytes are
+ * read with the same bound. Error messages name the path and the rule, never file content.
  *
  * @param filePath - File to read; must be inside `options.root`.
- * @param options - Root the file must stay inside. The root itself may be a symlink.
+ * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
- * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root, is a
- * symlink or not a regular file, a folder on the way is a symlink, or a folder or the file
- * changed while it was opened.
+ * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
+ * (`outside-root`), is a symlink or not a regular file (`symlink`, `not-file`), a folder on the way
+ * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the file
+ * or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
+ * (`unsafe-owner`), or the file is over the size limit (`too-large`).
  * @example
  * ```typescript
+ * // The folder should be 0700 and the file 0600.
  * const text = LocalEdgeKit_readFileSafe("/home/me/.config/edge/apps.json", { root: "/home/me/.config/edge" });
  * ```
  */
-export function LocalEdgeKit_readFileSafe(filePath: string, options: { root: string }): string | null {
+export function LocalEdgeKit_readFileSafe(filePath: string, options: LocalEdgeKit_SafeReadOptions): string | null {
   const root = path.resolve(options.root);
   const target = path.resolve(filePath);
   if (!LocalEdgeKit_isWithin(root, target) || target === root) {
     throw LocalEdgeKit_safeReadError("outside-root", `${target} is not inside ${root}`);
   }
+  const maxBytes = options.maxBytes ?? LOCAL_EDGE_KIT_SAFE_READ_MAX_BYTES;
+  const uid = options.uid ?? LocalEdgeKit_currentUid();
+  const folderUid = options.folderUid ?? uid;
   let realRoot: string;
   try {
     realRoot = realpathSync(root);
@@ -257,15 +348,30 @@ export function LocalEdgeKit_readFileSafe(filePath: string, options: { root: str
   if (!existing.isFile()) {
     throw LocalEdgeKit_safeReadError("not-file", `${resolved} is not a regular file`);
   }
-  const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  options.hooks?.beforeOpen?.();
+  // O_NONBLOCK: a FIFO swapped in after the checks above must not block the open.
+  const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile()) {
+      throw LocalEdgeKit_safeReadError("not-file", `${resolved} is not a regular file`);
+    }
     try {
       LocalEdgeKit_recheckChain(chain);
       LocalEdgeKit_assertFdIsPath(fd, resolved);
     } catch (error) {
       throw LocalEdgeKit_safeReadError("changed", (error as Error).message);
     }
-    return readFileSync(fd, "utf8");
+    const folder = chain[chain.length - 1];
+    if (folder !== undefined) {
+      LocalEdgeKit_assertPrivateFolder(folder, folderUid);
+    }
+    LocalEdgeKit_assertPrivateFile(opened, resolved, uid);
+    if (opened.size > maxBytes) {
+      throw LocalEdgeKit_safeReadError("too-large", `${resolved} is ${String(opened.size)} bytes, over the ${String(maxBytes)}-byte limit`);
+    }
+    options.hooks?.afterStat?.();
+    return LocalEdgeKit_readBounded(fd, resolved, maxBytes);
   } finally {
     closeSync(fd);
   }

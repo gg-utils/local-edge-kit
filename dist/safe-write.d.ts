@@ -22,8 +22,10 @@
  * (the umask can only remove bits). An existing file keeps its mode.
  * Flow: lexical check -> segment walk (lstat, mkdir one level, record dev/ino) -> open
  * O_NOFOLLOW -> recheck chain + fd identity -> write + fsync -> recheck chain -> rename -> dir fsync.
- * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, the same
- * `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are read.
+ * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, a
+ * non-blocking `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are
+ * read, then refuse a file or folder that group or others can write or that another user owns,
+ * and a file over the size limit.
  *
  * @example
  * ```typescript
@@ -45,6 +47,26 @@ export type LocalEdgeKit_SafeWriteHooks = {
     /** After the temp file was written and synced, before the last check and the rename. */
     beforeRename?: (() => void) | undefined;
 };
+/** Largest file `LocalEdgeKit_readFileSafe` reads by default: 256 KiB. */
+export declare const LOCAL_EDGE_KIT_SAFE_READ_MAX_BYTES: number;
+/** Options for `LocalEdgeKit_readFileSafe`. */
+export type LocalEdgeKit_SafeReadOptions = {
+    /** Folder the file must stay inside. The root itself may be a symlink. */
+    root: string;
+    /** Largest file accepted, checked by `fstat` and again while reading. Default 256 KiB. */
+    maxBytes?: number | undefined;
+    /** Owner the file must have. Default: the current user. Test seam. */
+    uid?: number | undefined;
+    /** Owner the containing folder must have. Default: `uid`. Test seam. */
+    folderUid?: number | undefined;
+    /** Test seams. Leave out in real use. */
+    hooks?: {
+        /** After the path checks, before the file is opened. */
+        beforeOpen?: (() => void) | undefined;
+        /** After the descriptor was checked with `fstat`, before the bytes are read. */
+        afterStat?: (() => void) | undefined;
+    } | undefined;
+};
 /** Options shared by the careful writers. */
 export type LocalEdgeKit_SafeWriteOptions = {
     /** Folder the target must stay inside. The root and its ancestors are trusted. */
@@ -58,23 +80,28 @@ export type LocalEdgeKit_SafeWriteOptions = {
 };
 /**
  * Reads a UTF-8 file inside `root` with the writers' containment rules: lexical containment, a
- * segment walk that refuses symlinked folders, no symlinked target, an `O_NOFOLLOW` open, and a
- * recheck of the folder chain and the descriptor's identity before reading.
+ * segment walk that refuses symlinked folders, no symlinked target, a non-blocking `O_NOFOLLOW`
+ * open, a recheck of the folder chain and the descriptor's identity, and then `fstat` of the
+ * descriptor: it must be a regular file owned by the current user and not writable by group or
+ * others, in a folder that is owned by the current user and not writable by group or others (a
+ * sticky bit does not excuse a writable folder), and no larger than `maxBytes`. The bytes are
+ * read with the same bound. Error messages name the path and the rule, never file content.
  *
  * @param filePath - File to read; must be inside `options.root`.
- * @param options - Root the file must stay inside. The root itself may be a symlink.
+ * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
- * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root, is a
- * symlink or not a regular file, a folder on the way is a symlink, or a folder or the file
- * changed while it was opened.
+ * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
+ * (`outside-root`), is a symlink or not a regular file (`symlink`, `not-file`), a folder on the way
+ * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the file
+ * or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
+ * (`unsafe-owner`), or the file is over the size limit (`too-large`).
  * @example
  * ```typescript
+ * // The folder should be 0700 and the file 0600.
  * const text = LocalEdgeKit_readFileSafe("/home/me/.config/edge/apps.json", { root: "/home/me/.config/edge" });
  * ```
  */
-export declare function LocalEdgeKit_readFileSafe(filePath: string, options: {
-    root: string;
-}): string | null;
+export declare function LocalEdgeKit_readFileSafe(filePath: string, options: LocalEdgeKit_SafeReadOptions): string | null;
 /**
  * Creates a folder (and missing folders above it, up to `root`) without following symlinks.
  *

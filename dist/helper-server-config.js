@@ -51,11 +51,11 @@ function LocalEdgeKit_helperServerPrefix(serviceLabel) {
 export function LocalEdgeKit_parseHelperServerPort(options) {
     const normalized = options.rawValue.trim();
     if (!/^\d+$/.test(normalized)) {
-        throw new Error(`${LocalEdgeKit_helperServerPrefix(options.serviceLabel)} ${options.label} must be a positive integer port. Received '${options.rawValue}'.`);
+        throw new Error(`${LocalEdgeKit_helperServerPrefix(options.serviceLabel)} ${options.label} must be a positive integer port.`);
     }
     const parsed = Number.parseInt(normalized, 10);
     if (parsed < 1 || parsed > 65535) {
-        throw new Error(`${LocalEdgeKit_helperServerPrefix(options.serviceLabel)} ${options.label} must be between 1 and 65535. Received '${options.rawValue}'.`);
+        throw new Error(`${LocalEdgeKit_helperServerPrefix(options.serviceLabel)} ${options.label} must be between 1 and 65535.`);
     }
     return parsed;
 }

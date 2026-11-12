@@ -1632,7 +1632,7 @@ void test("LocalEdgeKit_buildRuntimeLaunchBackgroundHealthPlan builds monitor co
   assert.equal(plan.strict, true);
   assert.equal(plan.logFile, "/repo/logs/health.log");
   assert.deepEqual(plan.warningLines, [
-    "[local] WARNING: Unsupported HEALTH_METHOD='unsupported'. Using 'nginx-docker'.",
+    "[local] WARNING: Unsupported HEALTH_METHOD value. Using 'nginx-docker'.",
   ]);
   assert.deepEqual(plan.command, {
     command: "runner",

@@ -27,6 +27,7 @@ import {
   LocalEdgeCore_isTruthy,
   LocalEdgeCore_validateRequestedMethod,
 } from "@gg-utils/local-edge-core";
+import { LocalEdgeKit_messageWord } from "./safe-message.js";
 
 export type LocalEdgeKit_CommandRuntimeOptions = {
   defaultProjectRoot: string;
@@ -360,6 +361,6 @@ export function LocalEdgeKit_commandRuntimeValidateRequestedMethod(options: {
   }
 
   throw new Error(
-    `[${options.commandLabel}] Unsupported --method '${options.method}'.`,
+    `[${options.commandLabel}] Unsupported --method '${LocalEdgeKit_messageWord(options.method)}'.`,
   );
 }

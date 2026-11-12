@@ -1,0 +1,53 @@
+/**
+ * @fileoverview Bounded text for error and warning messages. Environment variable values are never put in a
+ * message: those messages name the variable and the rule only. Command-line words and env variable
+ * names go through the helpers here, which repeat them only when they are short and plainly shaped.
+ */
+/** Shape of a command-line word the kit repeats in a message, such as a `--method` value. */
+const LOCAL_EDGE_KIT_MESSAGE_WORD_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/;
+/** Shape of an environment variable name the kit repeats in a message. */
+const LOCAL_EDGE_KIT_MESSAGE_ENV_NAME_SHAPE = /^[A-Z][A-Z0-9_]{0,63}$/;
+/** Most env variable names `LocalEdgeKit_messageEnvNames` repeats. */
+const LOCAL_EDGE_KIT_MESSAGE_NAMES_MAX_COUNT = 5;
+/**
+ * Names a command-line word, such as a `--method` value, in a message: the word itself when it is
+ * short and plain, otherwise `<N characters>`.
+ *
+ * A short alphanumeric token (up to 48 characters) is still repeated, by design: command-line
+ * input is not secret, and naming the rejected word helps the person who typed it. Control
+ * characters, spaces and anything longer are never repeated. Environment variable values must not
+ * go through this helper.
+ *
+ * @param value - The word as given.
+ * @returns Text that is safe to put in a message.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_messageWord("render"); // "render"
+ * LocalEdgeKit_messageWord("a b"); // "<3 characters>"
+ * ```
+ */
+export function LocalEdgeKit_messageWord(value) {
+    return LOCAL_EDGE_KIT_MESSAGE_WORD_SHAPE.test(value) ? value : `<${String(value.length)} characters>`;
+}
+/**
+ * Names a list of environment variable names in a message, comma separated: at most five, each
+ * repeated only when it has the env variable name shape (otherwise `<N characters>`), then a count
+ * of the rest. Names only; this never receives a value.
+ *
+ * @param names - The variable names as given.
+ * @returns Text that is safe to put in a message.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_messageEnvNames(["A_KEY", "B_KEY"]); // "A_KEY, B_KEY"
+ * LocalEdgeKit_messageEnvNames(["bad name"]); // "<8 characters>"
+ * ```
+ */
+export function LocalEdgeKit_messageEnvNames(names) {
+    const shown = names
+        .slice(0, LOCAL_EDGE_KIT_MESSAGE_NAMES_MAX_COUNT)
+        .map((name) => (LOCAL_EDGE_KIT_MESSAGE_ENV_NAME_SHAPE.test(name) ? name : `<${String(name.length)} characters>`));
+    const rest = names.length - shown.length;
+    return rest > 0 ? `${shown.join(", ")} (and ${String(rest)} more)` : shown.join(", ");
+}

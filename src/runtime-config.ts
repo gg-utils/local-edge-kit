@@ -32,6 +32,7 @@ import type {
   LocalEdgeKit_SurfaceConfig,
 } from "./config.js";
 import { LocalEdgeKit_resolveProjectRoot } from "./env.js";
+import { LocalEdgeKit_messageEnvNames } from "./safe-message.js";
 
 /** Runtime nginx-docker method facts after env/config resolution. */
 export type LocalEdgeKit_RuntimeNginxDockerMethod = {
@@ -131,7 +132,7 @@ function LocalEdgeKit_parseConfiguredMethods(options: {
 
   if (invalidMethods.length > 0) {
     throw new Error(
-      `[local-edge:config] Unsupported ${options.methodsEnvName} value(s): ${invalidMethods.join(", ")}.`,
+      `[local-edge:config] ${options.methodsEnvName} has ${String(invalidMethods.length)} unsupported method(s). Supported: ${options.supportedMethods.join(", ")}.`,
     );
   }
 
@@ -143,7 +144,7 @@ function LocalEdgeKit_parseConfiguredMethods(options: {
 
   if (options.singleMethodMode && uniqueMethods.length !== 1) {
     throw new Error(
-      `[local-edge:config] ${options.methodsEnvName} must contain exactly one method in single-method mode. Received '${uniqueMethods.join(",")}'.`,
+      `[local-edge:config] ${options.methodsEnvName} must contain exactly one method in single-method mode; it has ${String(uniqueMethods.length)}.`,
     );
   }
 
@@ -284,7 +285,7 @@ export function LocalEdgeKit_resolveRuntimeConfig(
   const unsupportedLegacyEnvKeys = LocalEdgeKit_findUnsupportedLegacyKeys(env);
   if (unsupportedLegacyEnvKeys.length > 0) {
     throw new Error(
-      `[local-edge:config] Unsupported legacy host-managed local-edge env keys detected. Remove: ${unsupportedLegacyEnvKeys.sort().join(", ")}.`,
+      `[local-edge:config] Unsupported legacy host-managed local-edge env keys detected. Remove: ${LocalEdgeKit_messageEnvNames(unsupportedLegacyEnvKeys.sort())}.`,
     );
   }
 

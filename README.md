@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0"
   }
 }
 ```
@@ -141,7 +141,7 @@ and nothing is recorded as active, so the next `up` tries again. Each rollback s
 not active, restore or remove the config) runs even when an earlier one failed, and the failures are
 listed in the failed result's `errors`; a host call that throws while the config may already be
 replaced (clearing the old marker socket, polling the marker, reading the new pid) is rolled back the
-same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says an nginx started by this run may still be running (with its pid when known) and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
+same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says the router this run launched may still be running (with its pid when known), that the process could not be identified as its nginx, and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
 be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
 place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
@@ -168,13 +168,23 @@ Per-machine extra apps (`@gg-utils/local-edge-kit/extra-apps`) add route-only ap
 part of the project config. `extraApps` takes a list of sources; each has a `name` and a `load()`.
 `LocalEdgeKit_createExtraAppsFileSource({ filePath, root? })` reads a JSON file with the careful
 rules: it must stay inside `root` after `realpath`, must not be a symlink, and is opened with
-`O_NOFOLLOW`. A missing file means no extra apps. The file holds
+`O_NOFOLLOW` (and `O_NONBLOCK`, so a FIFO swapped in cannot block it). A missing file means no
+extra apps. The file chooses which loopback ports are published, so it is checked like a secret:
+**keep it `0600` in a `0700` folder, both owned by you.** A file that is owned by someone else or
+writable by group or others (for example `0666`, `0620`, `0602`), or one in a folder that is owned
+by someone else or writable by group or others (a sticky bit does not excuse it), is refused with
+`local-edge-kit-safe-read-unsafe-mode` or `-unsafe-owner`; the error names the path and the rule,
+never the content. A file over 256 KiB, or one that is not a regular file, is refused too. The file holds
 `{ "apps": [{ "id", "host", "upstream": "127.0.0.1:<port>", "upstreamHost"?, "buffering"?,
 "readTimeout"?, "locations"?: [{ "path", "upstream", "upstreamPath"?, "upstreamHost"?,
 "buffering"?, "readTimeout"? }] }] }`. Every extra app is `external`. A location without
 `upstreamPath` passes the request URI through. The apps merge with the project's before every
 command, and a duplicate id or hostname across sources is refused with an error that names the
-host and both sources. Host labels and wildcards are checked by the router's usual rules.
+host and both sources. Hosts are compared after lowercasing and dropping a trailing dot, and ids
+without regard to case. The id `router` is reserved for the supervisor and refused. Unknown keys are
+refused at every level, so a typo such as `upstreamhost` is an error rather than silently lost, and a
+JSON syntax error reports only the line and column, never file text. Host labels and wildcards are
+checked by the router's usual rules.
 `status` adds a `SOURCE` column (`project` for apps from the config).
 
 ## CLI
@@ -183,7 +193,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -225,7 +235,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.0"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:
