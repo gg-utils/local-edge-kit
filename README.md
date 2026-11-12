@@ -80,6 +80,87 @@ flowchart TD
     G --> H
 ```
 
+## App Supervisor
+
+`@gg-utils/local-edge-kit/supervisor-cli` runs a set of loopback apps from one command and
+exposes them through a core exposure backend. Set `exposure.backend` to `ports` (the default:
+one tailnet HTTPS port per app) or `hostnames` (one public name per app under one wildcard,
+routed by SNI through a loopback nginx, configured by `exposure.hostnames`). `--backend=<name>` overrides the choice for one command.
+
+```ts
+import { LocalEdgeKit_runSupervisorCli } from "@gg-utils/local-edge-kit/supervisor-cli";
+
+process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slice(2), config });
+```
+
+Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs, a loopback port,
+an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
+and `dependsOn`. `launchEnv` (values, or a function called only when the app is started) is set
+over the supervisor's env for that process; it counts toward the required names and only its
+names are printed. `external: true` marks a route-only app: it is listed, probed and routed, but
+never started, stopped or signalled. `locations` adds extra path routes for the hostnames backend.
+
+| Command | What it does |
+|---|---|
+| `status [--json]` | Process state, health and edge state per app. |
+| `up [app...]` | Starts apps in dependency order and waits for health. Adopts a running app. |
+| `down [app...]` | Stops dependants first: SIGTERM to the process group, SIGKILL after the timeout. |
+| `health [app...]` | Probes the health and ready paths on `127.0.0.1`. |
+| `logs <app> [-n N] [-f]` | Tails the app log. |
+| `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
+| `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
+
+When `up` starts an app it gives the process a random launch id in its environment
+(`LOCAL_EDGE_KIT_LAUNCH_ID`) and writes the pid file with the process's identity: owner uid,
+start time, command line and that launch id. `ps` shows start times to the second only; the
+launch id tells apart a pid reused within the same second by the same user and command line.
+It is read back from `/proc/<pid>/environ` on Linux and from `ps -E` on macOS. Where the
+environment cannot be read (recent macOS shows none in `ps -E`), the check falls back to uid,
+start time and command line, so same-second reuse there is not detected. An app is adopted only when its pid file names a live process whose
+identity still matches and whose process tree holds the port, so a run started by an earlier
+`up` is never started twice and a recycled pid is never adopted. A pid file without an identity
+(written by another tool) is shown as `unverified`; such a process is never adopted or
+signalled. `down` checks the identity again immediately before every signal. A port held by any
+other process is reported as `port-busy`, and the supervisor never signals that process. The env
+check reads names only and never returns or prints values. Pid files are written atomically
+(temp file, fsync, rename) inside the app's `cwd`, and log files are opened without following
+symlinks.
+
+With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
+the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
+before it replaces the real one (an unchanged file that is not yet confirmed active is checked
+too). A running nginx is then sent SIGHUP, or nginx is started when none runs (never without the
+certificate and key). A delivered SIGHUP does not mean nginx took the new config, so the rendered
+config carries a loopback-only marker: a server on the unix socket
+`<folder of nginx.pidPath>/confirm.sock` (or `router.confirm.socketPath`) that answers
+`/local-edge-config` with the SHA-256 of the render. After the signal or start, `up` polls it
+(`router.confirm.timeoutMs`, default 5 s) and records the config as active only once it answers
+the new hash. If the reload or start fails or is not confirmed, the previous config bytes are put
+back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
+and nothing is recorded as active, so the next `up` tries again. Each rollback step (stop, record
+not active, restore or remove the config) runs even when an earlier one failed, and the failures are
+listed in the failed result's `errors`. If nginx confirmed the new config but its state file cannot
+be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
+place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
+the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
+is an `nginx: master process` of our user whose single `-c` value is the same file as this config
+after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
+other process there is `unverified` and is never signalled or replaced. `down` sends SIGQUIT, checking the
+identity again right before the signal. `status` adds a `router` row with the nginx pid and the
+Serve raw-TCP mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself
+is never changed by the supervisor.
+
+`up` and `down` hold a per-app lock (`<pidFile>.lock`) while they inspect, start or stop and
+publish the pid file, so two supervisors cannot start the same app twice. A lock file appears
+only complete (temp file, then `link`). A lock left by a process that is gone is taken over
+under a guard that removes only that exact stale lock, so a successor's lock is never removed.
+An empty or partial lock (an older version may still be writing it) is never removed
+automatically: remove it by hand once no supervisor runs. Pid, lock and log files must sit inside the app's `cwd`.
+They are written without following symlinks: folders are walked one level at a time and checked
+again after the open and before the rename, pid files are replaced atomically, and new files are
+`0600` and new folders `0700`. The `cwd` and its ancestors are trusted; folders below it must
+not be writable by other users (see `safe-write.ts` for the remaining window).
+
 ## CLI
 
 The package exposes a `local-edge-kit` bin for script adapters that can execute TypeScript source
