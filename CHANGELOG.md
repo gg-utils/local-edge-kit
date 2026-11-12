@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-11-12
 
-Adds per-machine extra apps: route-only apps that are not part of the project config, read from pluggable sources.
+Adds per-machine extra apps: route-only apps that are not part of the project config, read from pluggable sources. The file source is strict: a too-open apps file is refused.
 
 - **Extra-apps sources.** The supervisor config takes `extraApps`, a list of sources, each with a
   `name` and a `load()`. The sources are merged with `apps` before every command by
@@ -12,12 +12,27 @@ Adds per-machine extra apps: route-only apps that are not part of the project co
   inside `root` after `realpath`, no folder below the root may be a symlink, a symlinked file is
   refused, and the file is opened with `O_NOFOLLOW` and rechecked while the descriptor is held. A
   missing file means no extra apps.
+- **A too-open apps file is refused.** The file picks which loopback ports are published, so
+  `LocalEdgeKit_readFileSafe` now checks the opened descriptor with `fstat`: a file that group or
+  others can write (`0666`, `0620`, `0602`, ...) or that another user owns is refused with
+  `local-edge-kit-safe-read-unsafe-mode` / `-unsafe-owner`, and so is a containing folder that
+  group or others can write (a sticky bit does not excuse it) or that another user owns. The error
+  names the path and the rule, not the content. Keep the file `0600` in a `0700` folder.
+- **No file text in errors.** A JSON syntax error reports a fixed message with the line and
+  column (or that no position is known), not the engine's excerpt of the file.
+- **Unknown keys are refused** at the top level, in each app and in each location, so a typo such
+  as `upstreamhost` is an error instead of being dropped. A key is named only when it is a short
+  plain token; otherwise its number in the object is given.
+- **Size cap and non-blocking open.** The file is opened with `O_NONBLOCK`, a non-regular file is
+  refused after `fstat`, and files over 256 KiB (`LOCAL_EDGE_KIT_SAFE_READ_MAX_BYTES`, option
+  `maxBytes`) are refused by size and again while reading.
 - **Route-only apps.** Every extra app is `external`: the supervisor lists, probes and routes it and
   never starts, stops or signals it. Apps and locations carry `host`, `upstreamHost`, `buffering`
   and `readTimeout` through to the core router; a location without `upstreamPath` passes the
   request URI through. `LocalEdgeKit_SupervisedApp` gains `host`, `proxy` and `source`.
 - **Duplicates are refused.** A duplicate id or hostname across sources is an error that names the
-  host and both sources.
+  host and both sources. Hosts compare after lowercasing and dropping a trailing dot, ids without
+  regard to case, and the id `router` is reserved (`local-edge-kit-extra-apps-reserved-id`).
 - **`status` shows a `SOURCE` column** (`project` for apps from the config), and `status --json`
   rows gain a `source` field.
 - **Core is pinned to `v0.4.0`** (exact hosts, `upstreamHost`, buffering, `readTimeout`,
