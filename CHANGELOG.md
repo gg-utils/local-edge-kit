@@ -26,3 +26,10 @@ Compatibility changes in the app supervisor:
   (`<folder of nginx.pidPath>/confirm.sock` by default) answers its hash; the rendered config now
   contains that marker server. An nginx is adopted only when its `-c` value is exactly this
   config file; one started with another file is `unverified` and never signalled.
+- **Router step results can carry `errors`.** `LocalEdgeKit_SupervisorStepResult` has a new
+  optional `errors?: readonly string[]`, set by the router steps only and absent when empty. On a
+  failed `up` it lists every failed rollback or cleanup step (stop, state removal, not-active
+  record, config restore) and any host call that threw once the config might be replaced, in
+  order; `routerUp` rolls those throws back instead of throwing. `down` now returns `ok: true`,
+  action `stopped`, plus `errors` when nginx quit but only its state file could not be removed;
+  a host call that throws while stopping gives `ok: false` with the error.
