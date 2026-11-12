@@ -75,6 +75,8 @@ export type LocalEdgeKit_SupervisorHost = {
     fileSize(filePath: string): number;
     pidIsAlive(pid: number): boolean;
     processGroupOf(pid: number): number | null;
+    /** Parent pid, or null when unknown. Used to tie a listener back to the pid-file process. */
+    parentOf(pid: number): number | null;
     ownProcessGroup(): number | null;
     listenerPids(port: number): number[];
     kill(pid: number, signal: NodeJS.Signals | 0): void;
@@ -123,6 +125,17 @@ export declare function LocalEdgeKit_missingEnvNames(options: {
     envText: string | null;
     requiredNames: readonly string[];
 }): string[];
+/**
+ * True when `listener` belongs to the process tree started by `pid`: it is `pid`, shares its
+ * process group, or has `pid` among its ancestors. Dev servers often move their server into a
+ * child process group, so the group check alone is not enough.
+ */
+export declare function LocalEdgeKit_listenerBelongsTo(options: {
+    listener: number;
+    pid: number;
+    processGroup: number | null;
+    host: LocalEdgeKit_SupervisorHost;
+}): boolean;
 /** Reads a pid file and returns a positive integer pid, or null. */
 export declare function LocalEdgeKit_readPidFile(host: LocalEdgeKit_SupervisorHost, filePath: string): number | null;
 /** Inspects one app by pid file plus port check. Read-only. */
@@ -161,14 +174,16 @@ export declare function LocalEdgeKit_supervisorDown(options: {
     out: LocalEdgeKit_SupervisorWriter;
 }): LocalEdgeKit_SupervisorStepResult[];
 /**
- * Sends SIGTERM to the process group of `pid`, waits up to `timeoutMs`, then SIGKILL.
+ * Sends SIGTERM to the process group of `pid` (and of each `extraPids` entry, such as an owned
+ * listener in a child group), waits up to `timeoutMs`, then SIGKILL.
  *
  * @remarks
- * When the pid shares the supervisor's own process group (it was not started detached), only the
- * pid itself is signalled so the supervisor never signals its own group.
+ * A process that shares the supervisor's own process group is signalled by pid only, so the
+ * supervisor never signals its own group.
  */
 export declare function LocalEdgeKit_terminateProcessGroup(options: {
     pid: number;
+    extraPids?: readonly number[] | undefined;
     host: LocalEdgeKit_SupervisorHost;
     timeoutMs: number;
     out: LocalEdgeKit_SupervisorWriter;

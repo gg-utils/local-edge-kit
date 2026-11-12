@@ -87,6 +87,25 @@ void test("inspect adopts a pid-file process whose group holds the port", () => 
   assert.equal(LocalEdgeKit_inspectSupervisedApp(auth, host).state, "running");
 });
 
+void test("inspect adopts a listener in a child process group by ancestry, and down signals both groups", () => {
+  const host = fakeHost({
+    files: { "/w/web/.local/edge.pid": "41844" },
+    processes: [
+      { pid: 41844, group: 41844 },
+      { pid: 41856, group: 41844, parent: 41844 },
+      { pid: 41863, group: 41863, parent: 41856 },
+      { pid: 41887, group: 41863, parent: 41863 },
+      { pid: 41941, group: 41863, parent: 41887, port: 3210 },
+    ],
+  });
+  const web = apps()[0];
+  assert.ok(web);
+  assert.equal(LocalEdgeKit_inspectSupervisedApp(web, host).state, "running");
+  const results = LocalEdgeKit_supervisorDown({ apps: [{ ...web, dependsOn: [] }], requestedIds: ["web"], host, out });
+  assert.equal(results[0]?.action, "stopped");
+  assert.deepEqual(host.signals, [{ pid: -41844, signal: "SIGTERM" }, { pid: -41863, signal: "SIGTERM" }]);
+});
+
 void test("inspect reports stale pid, stopped, port-busy and starting", () => {
   const auth = apps()[1];
   assert.ok(auth);

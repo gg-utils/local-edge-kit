@@ -56,6 +56,11 @@ export function LocalEdgeKit_createSupervisorHost() {
             }
         },
         processGroupOf,
+        parentOf: (pid) => {
+            const result = LocalEdgeKit_runCapture("ps", ["-o", "ppid=", "-p", String(pid)]);
+            const value = Number(result.stdout.trim());
+            return result.status === 0 && Number.isInteger(value) && value > 0 ? value : null;
+        },
         ownProcessGroup: () => processGroupOf(process.pid),
         listenerPids: (port) => {
             const result = LocalEdgeKit_runCapture("lsof", [`-tiTCP:${String(port)}`, "-sTCP:LISTEN"]);
@@ -208,6 +213,25 @@ export function LocalEdgeKit_missingEnvNames(options) {
     }
     return options.requiredNames.filter((name) => !present.has(name));
 }
+/**
+ * True when `listener` belongs to the process tree started by `pid`: it is `pid`, shares its
+ * process group, or has `pid` among its ancestors. Dev servers often move their server into a
+ * child process group, so the group check alone is not enough.
+ */
+export function LocalEdgeKit_listenerBelongsTo(options) {
+    const { listener, pid, processGroup, host } = options;
+    if (listener === pid || (processGroup !== null && host.processGroupOf(listener) === processGroup)) {
+        return true;
+    }
+    let current = listener;
+    for (let depth = 0; depth < 32 && current !== null && current > 1; depth += 1) {
+        current = host.parentOf(current);
+        if (current === pid) {
+            return true;
+        }
+    }
+    return false;
+}
 /** Reads a pid file and returns a positive integer pid, or null. */
 export function LocalEdgeKit_readPidFile(host, filePath) {
     const text = host.readText(filePath);
@@ -232,7 +256,7 @@ export function LocalEdgeKit_inspectSupervisedApp(app, host) {
         if (listenerPids.length === 0) {
             return { ...base, state: "starting", pid, processGroup, note: "process alive, port not listening yet" };
         }
-        const owned = listenerPids.some((listener) => listener === pid || (processGroup !== null && host.processGroupOf(listener) === processGroup));
+        const owned = listenerPids.some((listener) => LocalEdgeKit_listenerBelongsTo({ listener, pid, processGroup, host }));
         if (owned) {
             return { ...base, state: "running", pid, processGroup, note: "pid file process holds the port" };
         }
@@ -369,8 +393,10 @@ export function LocalEdgeKit_supervisorDown(options) {
         if (inspection.pid === null || !host.pidIsAlive(inspection.pid)) {
             return { appId: app.id, ok: false, action: "failed", message: `not stopping: ${inspection.note}` };
         }
+        const ownedListeners = inspection.listenerPids.filter((listener) => LocalEdgeKit_listenerBelongsTo({ listener, pid: inspection.pid ?? 0, processGroup: inspection.processGroup, host }));
         LocalEdgeKit_terminateProcessGroup({
             pid: inspection.pid,
+            extraPids: ownedListeners,
             host,
             timeoutMs: app.stopTimeoutMs ?? LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS,
             out: options.out,
@@ -388,19 +414,23 @@ export function LocalEdgeKit_supervisorDown(options) {
     });
 }
 /**
- * Sends SIGTERM to the process group of `pid`, waits up to `timeoutMs`, then SIGKILL.
+ * Sends SIGTERM to the process group of `pid` (and of each `extraPids` entry, such as an owned
+ * listener in a child group), waits up to `timeoutMs`, then SIGKILL.
  *
  * @remarks
- * When the pid shares the supervisor's own process group (it was not started detached), only the
- * pid itself is signalled so the supervisor never signals its own group.
+ * A process that shares the supervisor's own process group is signalled by pid only, so the
+ * supervisor never signals its own group.
  */
 export function LocalEdgeKit_terminateProcessGroup(options) {
     const { host } = options;
-    const group = host.processGroupOf(options.pid);
-    const useGroup = group !== null && group > 1 && group !== host.ownProcessGroup();
-    const target = useGroup ? -group : options.pid;
+    const ownGroup = host.ownProcessGroup();
+    const targets = new Set();
+    for (const pid of [options.pid, ...(options.extraPids ?? [])]) {
+        const group = host.processGroupOf(pid);
+        targets.add(group !== null && group > 1 && group !== ownGroup ? -group : pid);
+    }
     LocalEdgeCore_runtimeStopTerminatePidList({
-        pids: [target],
+        pids: [...targets],
         kill: (pid, signal) => host.kill(pid, signal ?? "SIGTERM"),
         pidIsAlive: (pid) => {
             try {

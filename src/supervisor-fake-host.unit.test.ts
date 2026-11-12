@@ -13,13 +13,13 @@ export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
   spawned: { cwd: string; command: string; args: readonly string[] }[];
   files: Map<string, string>;
-  processes: Map<number, { pid: number; group: number; port?: number; alive: boolean }>;
+  processes: Map<number, { pid: number; group: number; port?: number; parent?: number; alive: boolean }>;
 };
 
 /** In-memory host. Processes are pids with a group, alive flag and optional listening port. */
 export function fakeHost(seed: {
   files?: Record<string, string>;
-  processes?: { pid: number; group: number; port?: number }[];
+  processes?: { pid: number; group: number; port?: number; parent?: number }[];
   ownGroup?: number;
   healthy?: (url: string) => number | null;
   onSpawn?: (host: FakeSupervisorHost, pid: number) => void;
@@ -41,6 +41,7 @@ export function fakeHost(seed: {
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
     processGroupOf: (pid) => (processes.get(pid)?.alive ? (processes.get(pid)?.group ?? null) : null),
+    parentOf: (pid) => processes.get(pid)?.parent ?? null,
     ownProcessGroup: () => seed.ownGroup ?? 1,
     listenerPids: (port) => [...processes.values()].filter((p) => p.alive && p.port === port).map((p) => p.pid),
     kill: (pid, signal) => {
