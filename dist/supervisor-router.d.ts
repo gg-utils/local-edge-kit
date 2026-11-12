@@ -146,7 +146,9 @@ export declare function LocalEdgeKit_inspectRouter(options: {
  * step, and a host call that threw once the config may have been replaced, is also listed in
  * `errors` (absent when none failed), in rollback order. A confirmed activation whose state file
  * cannot be written is `failed` with that error in `errors`, while nginx keeps running the
- * confirmed config. Once the config may have been replaced it never throws; a host read that
+ * confirmed config. An nginx this run started whose identity could not be confirmed after a host
+ * call threw is left running: it is named in `errors` and the message (with its pid when known) and
+ * is not recorded. Once the config may have been replaced it never throws; a host read that
  * fails before anything is changed (the config, the pid file) can still throw, with nothing
  * changed.
  * @example
@@ -169,8 +171,11 @@ export declare function LocalEdgeKit_routerUp(options: {
  * @returns `already-stopped`, `stopped`, or `failed` with the reason. A stopped router whose
  * state file could not be removed is still `ok: true` with action `stopped`; the removal error is
  * in `errors` and the message, and the next `up` starts nginx normally. A host call that throws
- * while stopping gives `ok: false` with that error in `errors`.
- * @throws When the manifest has no `hostnames` settings.
+ * while stopping gives `ok: false` with that error in `errors`. The reads before the signal (the
+ * pid file, the state file, the process identity) are not caught: if one fails the call throws,
+ * and nothing has been signalled, stopped or removed.
+ * @throws When the manifest has no `hostnames` settings, or when a read before the signal (pid
+ * file, state, identity) fails; in both cases nothing has been changed.
  * @example
  * ```typescript
  * LocalEdgeKit_routerDown({ manifest, router: { stateRoot: "/w/state" }, host });

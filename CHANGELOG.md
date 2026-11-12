@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.1
+
+Follow-ups to the 0.4.0 router: every host call that throws after the config may have been replaced is rolled back, and `down` reports failures instead of throwing.
+
+- **Router step results can carry `errors`.** `LocalEdgeKit_SupervisorStepResult` has a new
+  optional `errors?: readonly string[]`, set by the router steps only and absent when empty. On a
+  failed `up` it lists every failed rollback or cleanup step (stop, state removal, not-active
+  record, config restore) and any host call that threw once the config might be replaced, in
+  order; `routerUp` rolls those throws back instead of throwing. `down` now returns `ok: true`,
+  action `stopped`, plus `errors` when nginx quit but only its state file could not be removed;
+  a host call that throws while stopping gives `ok: false` with the error.
+- **A started nginx whose identity could not be read is stopped, or reported.** If a host call
+  throws after `nginx -c` returned 0 but before its pid is verified, `routerUp` identifies the
+  started nginx once more. If that works it is stopped through the verified-quit path and recorded
+  as not active; if not, nothing is signalled and both the message and `errors` say that an nginx
+  started by this run may still be running, with its pid when known, and what to check (the pid
+  file and the process list). The next `up` adopts a verified one.
+- **`routerDown` documents its reads.** The reads before the signal (pid file, state, identity)
+  can still throw, with nothing changed.
+
 ## 0.4.0
 
 Adds the `hostnames` router backend config (a supervised nginx with SNI routing, activation confirmed by a marker hash, rollback on failure) and hardens the app supervisor.
@@ -26,10 +46,3 @@ Compatibility changes in the app supervisor:
   (`<folder of nginx.pidPath>/confirm.sock` by default) answers its hash; the rendered config now
   contains that marker server. An nginx is adopted only when its `-c` value is exactly this
   config file; one started with another file is `unverified` and never signalled.
-- **Router step results can carry `errors`.** `LocalEdgeKit_SupervisorStepResult` has a new
-  optional `errors?: readonly string[]`, set by the router steps only and absent when empty. On a
-  failed `up` it lists every failed rollback or cleanup step (stop, state removal, not-active
-  record, config restore) and any host call that threw once the config might be replaced, in
-  order; `routerUp` rolls those throws back instead of throwing. `down` now returns `ok: true`,
-  action `stopped`, plus `errors` when nginx quit but only its state file could not be removed;
-  a host call that throws while stopping gives `ok: false` with the error.

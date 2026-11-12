@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.0
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.0"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
   }
 }
 ```
@@ -141,7 +141,7 @@ and nothing is recorded as active, so the next `up` tries again. Each rollback s
 not active, restore or remove the config) runs even when an earlier one failed, and the failures are
 listed in the failed result's `errors`; a host call that throws while the config may already be
 replaced (clearing the old marker socket, polling the marker, reading the new pid) is rolled back the
-same way and listed there too, so `up` returns a result instead of throwing. If nginx confirmed the new config but its state file cannot
+same way and listed there too, so `up` returns a result instead of throwing. If such a throw lands after nginx was started but before its pid could be verified, `up` tries once more to identify it and stops it; when it still cannot, the result says an nginx started by this run may still be running (with its pid when known) and what to check, and nothing is signalled. If nginx confirmed the new config but its state file cannot
 be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
 place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
@@ -170,7 +170,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.0 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -212,7 +212,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.0"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.4.1"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:

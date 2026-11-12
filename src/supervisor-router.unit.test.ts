@@ -738,8 +738,9 @@ void test("a throw while reading the new nginx's identity restores the config an
   };
   const result = routerUp(host);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.errors, ["a host call failed: ps broke"]);
+  assert.equal(result.errors?.[0], "a host call failed: ps broke");
   assert.match(result.message, /previous config restored/);
+  assert.match(result.message, /may still be running \(pid 500\)/);
   assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
 });
 
@@ -762,6 +763,114 @@ void test("a progress writer that throws after the new config was written rolls 
   assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
   assert.ok(!host.commands.some((c) => c[0] === "nginx" && c[1] === "-c"), "nginx was never started");
 });
+
+for (const before of BEFORE_CONFIGS) {
+  void test(`a config write that throws after touching the file is rolled back: ${before.name}`, () => {
+    const host = nginxHost({ files: { ...certFiles, ...before.files } });
+    const writeText = host.writeText.bind(host);
+    let torn = false;
+    host.writeText = (filePath, text, options) => {
+      if (filePath === "/st/nginx/nginx.conf" && !torn) {
+        torn = true;
+        writeText(filePath, "TORN", options);
+        throw new Error("EIO: config write");
+      }
+      writeText(filePath, text, options);
+    };
+    const result = routerUp(host);
+    assert.equal(result.ok, false);
+    assert.equal(result.action, "failed");
+    assert.match(result.message, /writing the config failed/);
+    assert.match(result.message, before.note);
+    assert.deepEqual(result.errors, ["a host call failed: EIO: config write"]);
+    assert.equal(host.files.get("/st/nginx/nginx.conf"), before.expected);
+    assert.ok(!host.commands.some((c) => c[0] === "nginx" && c[1] === "-c"), "nginx was never started");
+    assert.deepEqual(host.signals, []);
+    assert.equal(host.files.has(STATE_FILE), false);
+  });
+}
+
+const PID_FILE = "/st/nginx/nginx.pid";
+
+/** Makes `fn` throw on its first call after `nginx -c` ran (a transient failure) or on every call. */
+function throwAfterStart<A extends unknown[], R>(host: ReturnType<typeof nginxHost>, fn: (...args: A) => R, always: boolean, when: (...args: A) => boolean) {
+  let thrown = false;
+  return (...args: A): R => {
+    if (host.commands.some((c) => c[0] === "nginx" && c[1] === "-c") && when(...args) && (always || !thrown)) {
+      thrown = true;
+      throw new Error("ps broke");
+    }
+    return fn(...args);
+  };
+}
+
+for (const call of ["identity read", "own identity read"] as const) {
+  void test(`a transient throw between the nginx start and its identity check still stops the nginx it started and records not active: ${call}`, () => {
+    const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" } });
+    if (call === "identity read") {
+      host.processIdentity = throwAfterStart(host, host.processIdentity.bind(host), false, (pid) => pid === 500);
+    } else {
+      host.ownPid = throwAfterStart(host, host.ownPid.bind(host), false, () => true);
+    }
+    const result = routerUp(host);
+    assert.equal(result.ok, false);
+    assert.match(result.message, /activation was interrupted/);
+    assert.match(result.message, /nginx pid 500 it started was stopped/);
+    assert.match(result.message, /previous config restored/);
+    assert.doesNotMatch(result.message, /may still be running/);
+    assert.deepEqual(result.errors, ["a host call failed: ps broke"]);
+    assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+    assert.equal(host.processes.get(500)?.alive, false);
+    assert.equal(routerState(host)?.pid, 500);
+    assert.equal(routerState(host)?.activeConfigSha256, null);
+    assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+  });
+}
+
+void test("a throw between the nginx start and its identity check never stops a pid that turns out not to be our nginx master", () => {
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" } });
+  host.ownPid = throwAfterStart(host, host.ownPid.bind(host), false, () => true);
+  const identity = host.processIdentity.bind(host);
+  host.processIdentity = (pid) => {
+    const found = identity(pid);
+    return pid === 500 && found !== null ? { ...found, command: "nginx: master process nginx -c /elsewhere/nginx.conf" } : found;
+  };
+  const result = routerUp(host);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /may still be running \(pid 500\)/);
+  assert.equal(result.errors?.[0], "a host call failed: ps broke");
+  assert.equal(result.errors?.length, 2);
+  assert.deepEqual(host.signals, []);
+  assert.equal(host.processes.get(500)?.alive, true);
+  assert.equal(host.files.has(STATE_FILE), false);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+});
+
+for (const call of ["identity read", "pid file read"] as const) {
+  void test(`a throw between the nginx start and its identity check that cannot be resolved says a started nginx may still be running: ${call}`, () => {
+    const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" } });
+    if (call === "identity read") {
+      host.processIdentity = throwAfterStart(host, host.processIdentity.bind(host), true, (pid) => pid === 500);
+    } else {
+      host.readText = throwAfterStart(host, host.readText.bind(host), true, (filePath) => filePath === PID_FILE);
+    }
+    const result = routerUp(host);
+    const pid = call === "identity read" ? "pid 500" : "its pid is unknown";
+    assert.equal(result.ok, false);
+    assert.equal(result.action, "failed");
+    assert.match(result.message, /activation was interrupted/);
+    assert.match(result.message, new RegExp(`an nginx started by this run may still be running \\(${pid}\\)`));
+    assert.match(result.message, /Check \/st\/nginx\/nginx\.pid and the process list/);
+    assert.match(result.message, /previous config restored/);
+    assert.equal(result.errors?.length, 2);
+    assert.equal(result.errors?.[0], "a host call failed: ps broke");
+    assert.match(result.errors?.[1] ?? "", /^an nginx started by this run may still be running/);
+    assert.deepEqual(host.signals, []);
+    assert.equal(host.processes.get(500)?.alive, true);
+    assert.equal(host.files.has(STATE_FILE), false);
+    assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+  });
+}
 
 for (const path of [
   {
