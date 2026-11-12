@@ -44,6 +44,7 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -357,14 +358,18 @@ export function LocalEdgeKit_writeFileAtomic(filePath: string, text: string, opt
 }
 
 /**
- * Creates a new file inside `root` only when none exists (`O_EXCL`), as a lock or marker.
+ * Creates a new file inside `root` only when none exists, as a lock or marker. The complete
+ * content is first written and synced to a unique temp file beside the target, which is then
+ * `link()`ed to the target; `link` fails with EEXIST when the target exists. So the file is
+ * never visible empty or half-written, and of two concurrent creations exactly one succeeds.
  *
  * @param filePath - File to create; must be inside `options.root`.
- * @param text - Content written to the new file.
+ * @param text - Content of the new file.
  * @param options - Root, `mode` (0o600), `dirMode` (0o700) and test hooks.
  * @returns True when this call created the file, false when it already existed.
  * @throws Error with a `local-edge-kit-safe-write-` code on the same refusals as
- * `LocalEdgeKit_writeFileAtomic`; a file created before a refusal is removed again.
+ * `LocalEdgeKit_writeFileAtomic`. The temp file is always removed; the target is created only
+ * by the final `link`.
  * @example
  * ```typescript
  * if (!LocalEdgeKit_createFileExclusive("/w/app/.local/app.pid.lock", "123\n", { root: "/w/app" })) {
@@ -374,29 +379,38 @@ export function LocalEdgeKit_writeFileAtomic(filePath: string, text: string, opt
  */
 export function LocalEdgeKit_createFileExclusive(filePath: string, text: string, options: LocalEdgeKit_SafeWriteOptions): boolean {
   const { target, chain } = LocalEdgeKit_checkTarget(filePath, options);
+  const dir = path.dirname(target);
+  const temp = path.join(dir, `.${path.basename(target)}.${randomBytes(6).toString("hex")}.tmp`);
   options.hooks?.afterWalk?.();
-  let fd: number;
+  const mode = options.mode ?? 0o600;
+  const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, mode);
   try {
-    fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, options.mode ?? 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      return false;
+    try {
+      options.hooks?.afterOpen?.();
+      LocalEdgeKit_recheckChain(chain);
+      LocalEdgeKit_assertFdIsPath(fd, temp);
+      const bytes = Buffer.from(text, "utf8");
+      let offset = 0;
+      while (offset < bytes.length) {
+        offset += writeSync(fd, bytes, offset, bytes.length - offset);
+      }
+      fchmodSync(fd, mode);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
     }
-    throw error;
-  }
-  let ok = false;
-  try {
-    options.hooks?.afterOpen?.();
+    options.hooks?.beforeRename?.();
     LocalEdgeKit_recheckChain(chain);
-    LocalEdgeKit_assertFdIsPath(fd, target);
-    writeSync(fd, text);
-    fsyncSync(fd);
-    ok = true;
-  } finally {
-    closeSync(fd);
-    if (!ok) {
-      rmSync(target, { force: true });
+    try {
+      linkSync(temp, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        return false;
+      }
+      throw error;
     }
+  } finally {
+    rmSync(temp, { force: true });
   }
   return true;
 }

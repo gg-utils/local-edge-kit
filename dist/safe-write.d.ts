@@ -106,14 +106,18 @@ export declare function LocalEdgeKit_ensureSafeDir(dirPath: string, options: Loc
  */
 export declare function LocalEdgeKit_writeFileAtomic(filePath: string, text: string, options: LocalEdgeKit_SafeWriteOptions): void;
 /**
- * Creates a new file inside `root` only when none exists (`O_EXCL`), as a lock or marker.
+ * Creates a new file inside `root` only when none exists, as a lock or marker. The complete
+ * content is first written and synced to a unique temp file beside the target, which is then
+ * `link()`ed to the target; `link` fails with EEXIST when the target exists. So the file is
+ * never visible empty or half-written, and of two concurrent creations exactly one succeeds.
  *
  * @param filePath - File to create; must be inside `options.root`.
- * @param text - Content written to the new file.
+ * @param text - Content of the new file.
  * @param options - Root, `mode` (0o600), `dirMode` (0o700) and test hooks.
  * @returns True when this call created the file, false when it already existed.
  * @throws Error with a `local-edge-kit-safe-write-` code on the same refusals as
- * `LocalEdgeKit_writeFileAtomic`; a file created before a refusal is removed again.
+ * `LocalEdgeKit_writeFileAtomic`. The temp file is always removed; the target is created only
+ * by the final `link`.
  * @example
  * ```typescript
  * if (!LocalEdgeKit_createFileExclusive("/w/app/.local/app.pid.lock", "123\n", { root: "/w/app" })) {

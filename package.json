@@ -138,10 +138,6 @@
       "types": "./dist/supervisor-cli.d.ts",
       "default": "./dist/supervisor-cli.js"
     },
-    "./supervisor-router": {
-      "types": "./dist/supervisor-router.d.ts",
-      "default": "./dist/supervisor-router.js"
-    },
     "./extra-apps": {
       "types": "./dist/extra-apps.d.ts",
       "default": "./dist/extra-apps.js"
@@ -170,7 +166,7 @@
   },
   "packageManager": "npm@11.12.1",
   "dependencies": {
-    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#544c74927f1cb9a5091649bb5dd84863d63bed2a",
+    "@gg-utils/local-edge-core": "git+https://github.com/gg-utils/local-edge-core.git#3682fff90f588bebd53f38ac999075a0ab015792",
     "@gg-utils/platform-logs-core": "git+https://github.com/gg-utils/platform-logs-core.git#v0.2.0",
     "ink": "6.8.0",
     "react": "19.3.1"

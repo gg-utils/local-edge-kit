@@ -1,8 +1,9 @@
 /**
  * @fileoverview Verifies the router lifecycle for the hostnames backend through the supervisor
  * CLI with a fake host: candidate check, write and start, adopt only a verified nginx, SIGHUP
- * reload and SIGQUIT stop with an identity check, restoring the previous config when activation
- * fails, reloading a config that was written but never activated, and merging extra-app sources.
+ * reload and SIGQUIT stop with an identity check, activation confirmed by the marker hash (a
+ * received but rejected SIGHUP restores the old bytes), exact `-c` matching of a hand-started
+ * master, reloading a config that was written but never activated, and merging extra-app sources.
  *
  * @testing Node test runner (tsx): npm run test -- src/supervisor-router.unit.test.ts
  *
@@ -18,7 +19,7 @@ import { LocalEdgeCore_createExposureBackend } from "@gg-utils/local-edge-core/e
 
 import { type LocalEdgeKit_SupervisorConfig, LocalEdgeKit_buildExposureManifest, LocalEdgeKit_runSupervisorCli } from "./supervisor-cli.js";
 import { fakeHost, fakeIdentity, fakePidFile } from "./supervisor-fake-host.unit.test.js";
-import { LocalEdgeKit_routerDown } from "./supervisor-router.js";
+import { LocalEdgeKit_nginxMasterConfigArg, LocalEdgeKit_routerDown, LocalEdgeKit_routerUp } from "./supervisor-router.js";
 
 const HOST = "node-a.example.test";
 
@@ -92,15 +93,29 @@ function nginxMaster(pid = 500) {
   return { pid, group: pid, port: 8460, command: NGINX_MASTER };
 }
 
+/** The marker hash in a rendered config, or null when it has none. */
+function markerOf(text: string | undefined): string | null {
+  return /return 200 "([0-9a-f]{64})"/.exec(text ?? "")?.[1] ?? null;
+}
+
 /**
- * nginx fake: `-c conf` starts a master and writes its pid; `-t` succeeds. Signals: SIGHUP is a
- * reload (no state change), SIGQUIT stops the master.
+ * nginx fake: `-c conf` starts a master, writes its pid and loads the file; `-t` succeeds.
+ * Signals: SIGHUP reloads the file on disk unless `rejectReload` is set (then the master keeps
+ * its old config, as nginx does when the new one fails), SIGQUIT stops the master. The marker
+ * socket answers with the hash of the loaded config.
  */
-function nginxHost(seed: Parameters<typeof fakeHost>[0] = {}) {
-  return fakeHost({
+function nginxHost(seed: Parameters<typeof fakeHost>[0] & { rejectReload?: boolean; loaded?: string | null } = {}) {
+  const nginx = { loaded: seed.loaded ?? null };
+  const host = fakeHost({
     ...seed,
-    onCommand: (host, command, args) => {
-      const seeded = seed.onCommand?.(host, command, args);
+    fetchUnixSocket: (socketPath, urlPath) =>
+      seed.fetchUnixSocket
+        ? seed.fetchUnixSocket(socketPath, urlPath)
+        : socketPath === "/st/nginx/confirm.sock" && urlPath === "/local-edge-config"
+          ? nginx.loaded
+          : null,
+    onCommand: (h, command, args) => {
+      const seeded = seed.onCommand?.(h, command, args);
       if (seeded !== undefined) {
         return seeded;
       }
@@ -108,12 +123,21 @@ function nginxHost(seed: Parameters<typeof fakeHost>[0] = {}) {
         return { status: 0, stdout: JSON.stringify({ TCP: { "8460": { TCPForward: "127.0.0.1:8460" } } }), stderr: "" };
       }
       if (command === "nginx" && args.length === 2 && args[0] === "-c") {
-        host.processes.set(500, { ...nginxMaster(), alive: true });
-        host.files.set("/st/nginx/nginx.pid", "500\n");
+        h.processes.set(500, { ...nginxMaster(), alive: true });
+        h.files.set("/st/nginx/nginx.pid", "500\n");
+        nginx.loaded = markerOf(h.files.get(args[1] ?? ""));
       }
       return undefined;
     },
   });
+  const kill = host.kill.bind(host);
+  host.kill = (pid, signal) => {
+    kill(pid, signal);
+    if (pid === 500 && signal === "SIGHUP" && seed.rejectReload !== true) {
+      nginx.loaded = markerOf(host.files.get("/st/nginx/nginx.conf"));
+    }
+  };
+  return host;
 }
 
 /** Renders the config `up` would write, using a throwaway host. */
@@ -203,7 +227,7 @@ void test("a config written but never activated is reloaded even though the disk
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: stdout.writer, stderr: capture().writer }), 0);
   assert.match(stdout.text(), /reloaded/);
   assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGHUP" }]);
-  assert.ok(!host.commands.some((c) => c[1] === "-t"));
+  assert.deepEqual(host.commands.filter((c) => c[0] === "nginx"), [["nginx", "-t", "-q", "-c", "/st/nginx/nginx.conf"]]);
 });
 
 void test("a failed start removes a config that did not exist before", async () => {
@@ -213,7 +237,7 @@ void test("a failed start removes a config that did not exist before", async () 
   });
   const stdout = capture();
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: stdout.writer, stderr: capture().writer }), 1);
-  assert.match(stdout.text(), /bind failed; previous config restored/);
+  assert.match(stdout.text(), /bind failed; the config it created was removed/);
   assert.equal(host.files.has("/st/nginx/nginx.conf"), false);
 });
 
@@ -364,4 +388,319 @@ void test("extra-app sources merge into the router config and status shows each 
   const err = capture();
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: clash, host, stdout: capture().writer, stderr: err.writer }), 2);
   assert.match(err.text(), /duplicate hostname preview\.proj-m1\.example\.test: preview \(project\) and dupe \(machine\.json\)/);
+});
+
+const routerState = (host: ReturnType<typeof nginxHost>) =>
+  JSON.parse(host.files.get("/st/router.state.json") ?? "null") as { pid: number; activeConfigSha256: string | null } | null;
+
+void test("a SIGHUP that nginx receives but rejects is not adopted: old bytes are restored and nothing is recorded active", async () => {
+  const oldConfig = "old";
+  const host = nginxHost({
+    files: { ...certFiles, "/st/nginx/nginx.conf": oldConfig, "/st/nginx/nginx.pid": "500" },
+    processes: [nginxMaster()],
+    rejectReload: true,
+  });
+  const first = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: first.writer, stderr: capture().writer }), 1);
+  assert.match(first.text(), /reload not activated: nginx did not confirm the new config.*previous config restored/);
+  assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGHUP" }]);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), oldConfig);
+  assert.equal(routerState(host)?.activeConfigSha256 ?? null, null);
+  // The candidate was checked with nginx -t before the signal.
+  assert.deepEqual(host.commands.filter((c) => c[0] === "nginx").map((c) => c.slice(0, 3).join(" ")), ["nginx -t -q"]);
+  // The next run does not adopt: it signals again.
+  const second = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: second.writer, stderr: capture().writer }), 1);
+  assert.equal(host.signals.length, 2);
+});
+
+void test("a reload counts as activated only once the marker answers the new hash", async () => {
+  const rendered = await renderedConfig();
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" }, processes: [nginxMaster()] });
+  const stdout = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: stdout.writer, stderr: capture().writer }), 0);
+  assert.match(stdout.text(), /reloaded with the new config/);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), rendered);
+  assert.match(rendered, /listen unix:\/st\/nginx\/confirm\.sock;.*location = \/local-edge-config/);
+  assert.equal(typeof routerState(host)?.activeConfigSha256, "string");
+  const again = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: again.writer, stderr: capture().writer }), 0);
+  assert.match(again.text(), /config current and active/);
+  assert.equal(host.signals.length, 1);
+});
+
+void test("a started nginx whose marker never answers is not recorded as active", () => {
+  const host = nginxHost({ files: { ...certFiles }, fetchUnixSocket: () => "f".repeat(64) });
+  const result = LocalEdgeKit_routerUp({ manifest: LocalEdgeKit_buildExposureManifest(hostConfig), router: { stateRoot: "/st", confirm: { timeoutMs: 1000 } }, host, out: capture().writer });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /started but not activated.*marker gave hash ffffffffffff/);
+  assert.equal(routerState(host)?.activeConfigSha256, null);
+});
+
+void test("the nginx -c value is parsed exactly", () => {
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("nginx: master process nginx -c /st/nginx/nginx.conf"), "/st/nginx/nginx.conf");
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("nginx: master process /usr/sbin/nginx -g daemon off; -c/st/nginx/nginx.conf"), "/st/nginx/nginx.conf");
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("nginx: master process nginx -c /a.conf -c /b.conf"), null);
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("nginx: master process nginx"), null);
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("nginx: worker process"), null);
+  assert.equal(LocalEdgeKit_nginxMasterConfigArg("sh -c nginx: master process nginx -c /st/nginx/nginx.conf"), null);
+});
+
+void test("a master for a longer, prefix or suffix config name never gets SIGQUIT or SIGHUP", async () => {
+  const manifest = LocalEdgeKit_buildExposureManifest(hostConfig);
+  for (const other of ["/st/nginx/nginx.conf.evil", "/st/nginx/nginx.co", "/x/st/nginx/nginx.conf", "/st/nginx/nginx.conf/x"]) {
+    const command = `nginx: master process nginx -c ${other}`;
+    // With no recorded state, and with a recorded identity that is stale (another start time).
+    for (const state of [null, JSON.stringify({ pid: 500, identity: fakeIdentity(500, { command: NGINX_MASTER, startedAt: "earlier" }), activeConfigSha256: null })]) {
+      const host = nginxHost({
+        files: { ...certFiles, "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500", ...(state === null ? {} : { "/st/router.state.json": state }) },
+        processes: [{ ...nginxMaster(), command }],
+      });
+      assert.equal(LocalEdgeKit_routerDown({ manifest, router: { stateRoot: "/st" }, host }).ok, false, other);
+      const up = capture();
+      assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: hostConfig, host, stdout: up.writer, stderr: capture().writer }), 1, other);
+      assert.match(up.text(), /not an nginx master for this config/);
+      assert.deepEqual(host.signals, [], other);
+      assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+    }
+  }
+});
+
+void test("a master naming the same file through a symlink is adopted after resolving both sides", () => {
+  const host = nginxHost({
+    files: { "/st/nginx/nginx.pid": "500" },
+    processes: [{ ...nginxMaster(), command: "nginx: master process nginx -c /link/nginx.conf" }],
+    realPaths: { "/link/nginx.conf": "/st/nginx/nginx.conf" },
+  });
+  const result = LocalEdgeKit_routerDown({ manifest: LocalEdgeKit_buildExposureManifest(hostConfig), router: { stateRoot: "/st" }, host });
+  assert.equal(result.ok, true);
+  assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+});
+
+for (const marker of [
+  { name: "times out", answer: () => null, seen: /marker gave no answer/ },
+  { name: "answers another hash", answer: () => "f".repeat(64), seen: /marker gave hash ffffffffffff/ },
+]) {
+  for (const before of [
+    { name: "an existing config", files: { "/st/nginx/nginx.conf": "old" }, expected: "old", note: /previous config restored/ },
+    { name: "no config yet", files: {}, expected: undefined, note: /the config it created was removed/ },
+  ]) {
+    void test(`a started nginx whose marker ${marker.name} is stopped and ${before.name} is put back`, () => {
+      const host = nginxHost({ files: { ...certFiles, ...before.files }, fetchUnixSocket: marker.answer });
+      const result = LocalEdgeKit_routerUp({
+        manifest: LocalEdgeKit_buildExposureManifest(hostConfig),
+        router: { stateRoot: "/st", confirm: { timeoutMs: 1000 } },
+        host,
+        out: capture().writer,
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.message, /started but not activated/);
+      assert.match(result.message, marker.seen);
+      assert.match(result.message, before.note);
+      assert.match(result.message, /nginx pid 500 it started was stopped/);
+      assert.equal(host.files.get("/st/nginx/nginx.conf"), before.expected);
+      assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+      assert.equal(host.processes.get(500)?.alive, false);
+      assert.equal(routerState(host)?.activeConfigSha256, null);
+    });
+  }
+}
+
+/** Runs `routerUp` on `host` with a short confirm wait. */
+function routerUp(host: ReturnType<typeof nginxHost>, confirmMs = 1000) {
+  return LocalEdgeKit_routerUp({
+    manifest: LocalEdgeKit_buildExposureManifest(hostConfig),
+    router: { stateRoot: "/st", confirm: { timeoutMs: confirmMs }, stopTimeoutMs: 3000 },
+    host,
+    out: capture().writer,
+  });
+}
+
+const STATE_FILE = "/st/router.state.json";
+
+void test("rollback is best-effort: a state file that cannot be removed still records not-active, puts the old bytes back and returns the failure", () => {
+  for (const before of [{ files: { "/st/nginx/nginx.conf": "old" }, expected: "old" }, { files: {}, expected: undefined }]) {
+    const host = nginxHost({ files: { ...certFiles, ...before.files }, fetchUnixSocket: () => null });
+    const removeFile = host.removeFile.bind(host);
+    host.removeFile = (filePath) => {
+      if (filePath === STATE_FILE) {
+        throw new Error("EACCES: state removal");
+      }
+      removeFile(filePath);
+    };
+    const result = routerUp(host);
+    assert.equal(result.ok, false);
+    assert.equal(result.action, "failed");
+    assert.match(result.message, /started but not activated/);
+    assert.match(result.message, /removing the router state file also failed: EACCES: state removal/);
+    assert.deepEqual(result.errors, ["removing the router state file also failed: EACCES: state removal"]);
+    assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+    assert.equal(host.processes.get(500)?.alive, false);
+    assert.equal(routerState(host)?.activeConfigSha256, null);
+    assert.equal(routerState(host)?.pid, 500);
+    assert.equal(host.files.get("/st/nginx/nginx.conf"), before.expected);
+  }
+});
+
+void test("rollback is best-effort: a failing restore is reported with its error, the stop and the not-active state still happened", () => {
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" }, fetchUnixSocket: () => null });
+  const writeText = host.writeText.bind(host);
+  let confWrites = 0;
+  host.writeText = (filePath, text, options) => {
+    if (filePath === "/st/nginx/nginx.conf" && ++confWrites === 2) {
+      throw new Error("ENOSPC: restore");
+    }
+    writeText(filePath, text, options);
+  };
+  const result = routerUp(host);
+  assert.equal(result.ok, false);
+  assert.equal(result.action, "failed");
+  assert.match(result.message, /nginx pid 500 it started was stopped/);
+  assert.match(result.message, /restoring the previous config also failed: ENOSPC: restore/);
+  assert.deepEqual(result.errors, ["restoring the previous config also failed: ENOSPC: restore"]);
+  assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+  assert.equal(routerState(host)?.activeConfigSha256, null);
+});
+
+void test("rollback is best-effort: a throw while stopping does not skip the not-active state or the restore", () => {
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" }, fetchUnixSocket: () => null });
+  host.processIdentity = ((inner) => (pid: number) => {
+    if (pid === 500 && host.signals.length > 0) {
+      throw new Error("ps broke");
+    }
+    return inner(pid);
+  })(host.processIdentity.bind(host));
+  const result = routerUp(host);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /stopping the nginx it started failed: ps broke/);
+  assert.deepEqual(result.errors, ["stopping the nginx it started failed: ps broke"]);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+  assert.equal(routerState(host)?.activeConfigSha256, null);
+});
+
+void test("a reload or start that nginx confirmed but whose state cannot be written says nginx keeps running the confirmed config and the next run reloads it", () => {
+  for (const start of [true, false]) {
+    const host = nginxHost({
+      files: { ...certFiles, ...(start ? {} : { "/st/nginx/nginx.conf": "old", "/st/nginx/nginx.pid": "500" }) },
+      ...(start ? {} : { processes: [nginxMaster()] }),
+    });
+    const writeText = host.writeText.bind(host);
+    let failState = true;
+    host.writeText = (filePath, text, options) => {
+      if (failState && filePath === STATE_FILE) {
+        throw new Error("EROFS: state write");
+      }
+      writeText(filePath, text, options);
+    };
+    const result = routerUp(host);
+    assert.equal(result.ok, false);
+    assert.equal(result.action, "failed");
+    assert.match(result.message, new RegExp(`nginx ${start ? "started" : "reloaded"} but its state could not be recorded: EROFS: state write`));
+    assert.match(result.message, /nginx pid 500 is still running and the confirmed new config stays active and in place \(nothing was rolled back\)/);
+    assert.match(result.message, /the next run will reload it again and record the state/);
+    assert.deepEqual(result.errors, ["EROFS: state write"]);
+    assert.ok(!host.signals.some((s) => s.signal === "SIGQUIT"));
+    assert.equal(host.processes.get(500)?.alive, true);
+    assert.notEqual(host.files.get("/st/nginx/nginx.conf"), "old");
+    assert.equal(host.files.has(STATE_FILE), false);
+    // The message is true: with writes working again, the next run reloads and records the state.
+    failState = false;
+    const next = routerUp(host);
+    assert.equal(next.ok, true);
+    assert.match(next.message, /reloaded with the new config/);
+    assert.equal(typeof routerState(host)?.activeConfigSha256, "string");
+  }
+});
+
+for (const scenario of [
+  {
+    name: "nginx exits non-zero",
+    seed: { onCommand: (_h: unknown, command: string, args: readonly string[]) => (command === "nginx" && args[0] === "-c" ? { status: 1, stdout: "", stderr: "bind failed" } : undefined) },
+    note: /bind failed/,
+  },
+  {
+    name: "the pid file names no live process",
+    seed: {
+      onCommand: (h: ReturnType<typeof fakeHost>, command: string, args: readonly string[]) => {
+        if (command === "nginx" && args[0] === "-c") {
+          h.files.set("/st/nginx/nginx.pid", "777\n");
+          return { status: 0, stdout: "", stderr: "" };
+        }
+        return undefined;
+      },
+    },
+    note: /pid file names no live process/,
+  },
+  {
+    name: "the pid is not our master",
+    seed: {
+      processes: [{ pid: 600, group: 600, command: "nginx: master process nginx -c /other.conf" }],
+      onCommand: (h: ReturnType<typeof fakeHost>, command: string, args: readonly string[]) => {
+        if (command === "nginx" && args[0] === "-c") {
+          h.files.set("/st/nginx/nginx.pid", "600\n");
+          return { status: 0, stdout: "", stderr: "" };
+        }
+        return undefined;
+      },
+    },
+    note: /pid 600 is not an nginx master for this config; not recorded or signalled/,
+  },
+]) {
+  void test(`other start failures stop nothing: ${scenario.name}, so the previous config is restored and no signal is sent`, () => {
+    const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" }, ...scenario.seed });
+    const result = routerUp(host);
+    assert.equal(result.ok, false);
+    assert.match(result.message, scenario.note);
+    assert.match(result.message, /previous config restored/);
+    assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+    assert.deepEqual(host.signals, []);
+    assert.equal(host.files.has(STATE_FILE), false);
+    assert.equal(host.processes.get(600)?.alive ?? true, true);
+  });
+}
+
+void test("a master that ignores SIGQUIT is reported as still running after the bounded wait, and the config is still restored", () => {
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" }, fetchUnixSocket: () => null });
+  const kill = host.kill.bind(host);
+  host.kill = (pid, signal) => {
+    if (signal === "SIGQUIT") {
+      host.signals.push({ pid, signal });
+      return;
+    }
+    kill(pid, signal);
+  };
+  const started = host.now();
+  const result = routerUp(host);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /stopping the nginx it started failed: nginx still running after quit/);
+  assert.match(result.message, /previous config restored/);
+  assert.deepEqual(result.errors, ["stopping the nginx it started failed: nginx still running after quit"]);
+  assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
+  assert.equal(host.processes.get(500)?.alive, true);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
+  assert.equal(routerState(host)?.activeConfigSha256, null);
+  // Bounded: the stop wait (3000 ms) plus the confirm wait (1000 ms), no escalation.
+  assert.ok(host.now() - started <= 3000 + 1000 + 600);
+});
+
+void test("the identity is checked again during rollback: a pid whose identity changed gets no SIGQUIT, and the config is still restored", () => {
+  const host = nginxHost({ files: { ...certFiles, "/st/nginx/nginx.conf": "old" }, fetchUnixSocket: () => null });
+  const identity = host.processIdentity.bind(host);
+  let swapped = false;
+  const fetch = host.fetchUnixSocketText.bind(host);
+  host.fetchUnixSocketText = (socketPath, urlPath, timeoutMs) => {
+    swapped = true;
+    return fetch(socketPath, urlPath, timeoutMs);
+  };
+  host.processIdentity = (pid) => {
+    const current = identity(pid);
+    return swapped && pid === 500 && current !== null ? { ...current, startedAt: "recycled" } : current;
+  };
+  const result = routerUp(host);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /stopping the nginx it started failed: SIGQUIT not sent/);
+  assert.match(result.message, /previous config restored/);
+  assert.deepEqual(host.signals, []);
+  assert.equal(host.processes.get(500)?.alive, true);
+  assert.equal(host.files.get("/st/nginx/nginx.conf"), "old");
 });

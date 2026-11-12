@@ -159,3 +159,20 @@ void test("exclusive create returns false for an existing file and refuses an an
     box.done();
   }
 });
+
+void test("exclusive create never shows the file before its content is complete, and leaves no temp file", () => {
+  const box = sandbox();
+  try {
+    const lock = path.join(box.root, "c.lock");
+    const seen: (string | null)[] = [];
+    const look = () => void seen.push(existsSync(lock) ? readFileSync(lock, "utf8") : null);
+    assert.equal(LocalEdgeKit_createFileExclusive(lock, "42\nfull content\n", { root: box.root, hooks: { afterOpen: look, beforeRename: look } }), true);
+    assert.deepEqual(seen, [null, null], "the lock path is empty until the final link");
+    assert.equal(readFileSync(lock, "utf8"), "42\nfull content\n");
+    // A second creator that already wrote its temp file loses at the link, and removes the temp.
+    assert.equal(LocalEdgeKit_createFileExclusive(lock, "43\n", { root: box.root }), false);
+    assert.deepEqual(readdirSync(box.root), ["c.lock"]);
+  } finally {
+    box.done();
+  }
+});

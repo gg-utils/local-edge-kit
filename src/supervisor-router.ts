@@ -5,25 +5,31 @@
  * Identity: nginx writes its own pid file, so a pid there proves nothing. The router counts as
  * ours only when the live process at that pid matches the identity this module recorded when it
  * started or last reloaded it (`router.state.json` in `stateRoot`), or, for an nginx started
- * by hand, when it runs as our uid with an `nginx: master process` command line naming this
- * config file. Anything else is `unverified`: never reloaded, quit or replaced. Reload and quit
+ * by hand, when it runs as our uid with an `nginx: master process` command line whose single
+ * `-c` value is this config file (compared after resolving symlinks on both sides, never as a
+ * substring). Anything else is `unverified`: never reloaded, quit or replaced. Reload and quit
  * are sent as SIGHUP and SIGQUIT straight to that pid, and the identity is read again
  * immediately before each signal (see `process-identity.ts`).
  *
- * Activation: a config that is written is not yet active. The state file records the SHA-256 of
- * the config the verified nginx last accepted (start or reload). `up` does nothing only when the
+ * Activation: a config that is written is not yet active, and a delivered SIGHUP is only a
+ * request. The rendered config therefore carries a loopback-only marker server on a unix socket
+ * inside `stateRoot` that answers with the SHA-256 of the render. After a reload or start the
+ * marker is polled until it answers the new hash; only then does the state file record the
+ * SHA-256 of the file as the config the verified nginx accepted. `up` does nothing only when the
  * render equals the file on disk and that file is the active one for the running pid; a written
  * but never activated config is reloaded on the next run. A rendered config is checked with
  * `nginx -t` as a candidate file before it replaces the real one; when the reload or start then
- * fails, the previous bytes are put back (or the file is removed when there was none), so the
- * file on disk never claims a config the router does not run.
+ * fails or is not confirmed in time, the previous bytes are put back (or the file is removed
+ * when there was none), an nginx this run started is stopped, and nothing is recorded as
+ * active, so the next run tries again.
  *
  * Files: every router file stays inside `stateRoot` and is written through `safe-write.ts`
  * (folders walked without following symlinks and checked again before the rename; the
  * `stateRoot` and its ancestors are trusted). nginx is not started without the certificate and
  * key.
  * Flow: manifest -> core render -> verify pid -> compare disk and activation -> candidate +
- * nginx -t -> atomic replace -> SIGHUP or start -> record activation, or restore the previous bytes.
+ * nginx -t -> atomic replace -> SIGHUP or start -> poll marker -> record activation, or restore
+ * the previous bytes.
  *
  * @example
  * ```typescript
@@ -65,7 +71,17 @@ export type LocalEdgeKit_SupervisorRouterConfig = {
   nginxBin?: string | undefined;
   /** How long `down` waits for nginx to quit. Default 10 s. */
   stopTimeoutMs?: number | undefined;
+  /**
+   * Activation check. The rendered config gets a marker server on this HTTP unix socket that
+   * answers `/local-edge-config` with the SHA-256 of the render; after a reload or start the
+   * marker is polled until it answers the new hash. Default socket:
+   * `<folder of nginx.pidPath>/confirm.sock`; default timeout 5 s.
+   */
+  confirm?: { socketPath?: string | undefined; timeoutMs?: number | undefined } | undefined;
 };
+
+/** URL path of the activation marker. */
+export const LOCAL_EDGE_KIT_ROUTER_MARKER_PATH = "/local-edge-config";
 
 /** Row id used for the router in supervisor output. */
 export const LOCAL_EDGE_KIT_ROUTER_ID = "router";
@@ -98,16 +114,92 @@ function LocalEdgeKit_requireHostnames(manifest: LocalEdgeCore_ExposureManifest)
   return manifest.hostnames;
 }
 
-function LocalEdgeKit_tryRender(manifest: LocalEdgeCore_ExposureManifest): { text: string } | { error: string } {
+function LocalEdgeKit_sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/** A rendered router config: the file text, the hash the marker answers, and the marker socket. */
+type LocalEdgeKit_RouterRender = { text: string; markerSha: string; socketPath: string };
+
+/**
+ * Path of the activation marker socket.
+ *
+ * @param router - Router settings.
+ * @param settings - Hostnames settings (the pid path locates the default).
+ * @returns The socket path.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_routerMarkerSocket({ stateRoot: "/w/state" }, settings); // "/w/state/nginx/confirm.sock"
+ * ```
+ */
+export function LocalEdgeKit_routerMarkerSocket(
+  router: LocalEdgeKit_SupervisorRouterConfig,
+  settings: LocalEdgeCore_ExposureHostnamesConfig,
+): string {
+  return path.resolve(router.confirm?.socketPath ?? path.join(path.dirname(settings.nginx.pidPath), "confirm.sock"));
+}
+
+/**
+ * Renders the core config and adds the loopback-only activation marker: a server on a unix
+ * socket inside `stateRoot` that answers with the SHA-256 of the core render.
+ */
+function LocalEdgeKit_tryRender(
+  manifest: LocalEdgeCore_ExposureManifest,
+  router: LocalEdgeKit_SupervisorRouterConfig,
+): LocalEdgeKit_RouterRender | { error: string } {
   try {
-    return { text: LocalEdgeCore_renderExposureHostnamesNginxConfig(manifest) };
+    const settings = LocalEdgeKit_requireHostnames(manifest);
+    const base = LocalEdgeCore_renderExposureHostnamesNginxConfig(manifest);
+    const socketPath = LocalEdgeKit_routerMarkerSocket(router, settings);
+    const relative = path.relative(path.resolve(router.stateRoot), socketPath);
+    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+      return { error: `marker socket ${socketPath} must be inside ${router.stateRoot}` };
+    }
+    if (!/^[A-Za-z0-9._/@+-]+$/.test(socketPath) || Buffer.byteLength(socketPath) > 100) {
+      return { error: `marker socket path ${socketPath} is too long or has characters nginx cannot take; set router.confirm.socketPath` };
+    }
+    if (!base.endsWith("\n}\n")) {
+      return { error: "the core render does not end with the http block; cannot add the activation marker" };
+    }
+    const markerSha = LocalEdgeKit_sha256(base);
+    const marker =
+      `  server { listen unix:${socketPath}; access_log off; ` +
+      `location = ${LOCAL_EDGE_KIT_ROUTER_MARKER_PATH} { default_type text/plain; return 200 "${markerSha}"; } ` +
+      "location / { return 404; } }";
+    return { text: `${base.slice(0, -2)}${marker}\n}\n`, markerSha, socketPath };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-function LocalEdgeKit_sha256(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
+/**
+ * The value of nginx's `-c` option in an nginx master's command line (`-c <path>` or
+ * `-c<path>`), or null when the line is not an nginx master or has no, or more than one, `-c`.
+ *
+ * @param command - Command line as `ps` prints it, such as `nginx: master process nginx -c /w/nginx.conf`.
+ * @returns The exact `-c` value.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_nginxMasterConfigArg("nginx: master process nginx -c /w/nginx.conf"); // "/w/nginx.conf"
+ * ```
+ */
+export function LocalEdgeKit_nginxMasterConfigArg(command: string): string | null {
+  const prefix = "nginx: master process ";
+  if (!command.startsWith(prefix)) {
+    return null;
+  }
+  const tokens = command.slice(prefix.length).trim().split(/\s+/);
+  const values: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
+    if (token === "-c") {
+      values.push(tokens[index + 1] ?? "");
+      index += 1;
+    } else if (token.startsWith("-c") && token.length > 2) {
+      values.push(token.slice(2));
+    }
+  }
+  return values.length === 1 && values[0] !== "" ? (values[0] ?? null) : null;
 }
 
 /**
@@ -150,8 +242,10 @@ function LocalEdgeKit_writeRouterState(
 }
 
 /**
- * True when `identity` looks like an nginx master we may adopt: same uid as the supervisor,
- * an `nginx: master process` command line, and that command line names `confPath`.
+ * True when `identity` looks like an nginx master we may adopt: same uid as the supervisor, an
+ * `nginx: master process` command line, and exactly one absolute `-c` value that is the same
+ * file as `confPath` after resolving symlinks on both sides. A longer name, a prefix or a
+ * suffix of `confPath` is a different file and never matches.
  */
 function LocalEdgeKit_looksLikeOurNginx(
   host: LocalEdgeKit_SupervisorHost,
@@ -159,7 +253,15 @@ function LocalEdgeKit_looksLikeOurNginx(
   confPath: string,
 ): boolean {
   const own = host.processIdentity(host.ownPid());
-  return own !== null && identity.uid === own.uid && identity.command.includes("nginx: master process") && identity.command.includes(confPath);
+  if (own === null || identity.uid !== own.uid) {
+    return false;
+  }
+  const arg = LocalEdgeKit_nginxMasterConfigArg(identity.command);
+  if (arg === null || !path.isAbsolute(arg)) {
+    return false;
+  }
+  const canonical = (filePath: string): string => host.realPath(filePath) ?? path.resolve(filePath);
+  return canonical(arg) === canonical(confPath);
 }
 
 /** Classifies the pid in nginx's pid file as none, ours (verified) or unverified. Read-only. */
@@ -240,7 +342,7 @@ export function LocalEdgeKit_inspectRouter(options: {
   const { host } = options;
   const owner = LocalEdgeKit_routerOwner(host, options.router, settings);
   const onDisk = host.readText(settings.nginx.confPath);
-  const rendered = LocalEdgeKit_tryRender(options.manifest);
+  const rendered = LocalEdgeKit_tryRender(options.manifest, options.router);
   const config =
     "error" in rendered ? "invalid" : onDisk === null ? "missing" : onDisk === rendered.text ? "current" : "differs";
   const active =
@@ -272,8 +374,12 @@ function LocalEdgeKit_runNginx(host: LocalEdgeKit_SupervisorHost, bin: string, a
 /**
  * Brings the router up. Renders the config; when it differs from the file on disk, checks a
  * candidate with `nginx -t` and replaces the file atomically. Then activates it: SIGHUP to a
- * verified running nginx, or starts nginx when none runs. When activation fails the previous
- * bytes are restored. Never restarts a running nginx and never touches an unverified one.
+ * verified running nginx, or starts nginx when none runs, and polls the activation marker until
+ * it answers the new render's hash. When the reload or start fails or is not confirmed in time,
+ * one rollback runs: an nginx this run started is stopped (SIGQUIT, identity checked again), the
+ * previous bytes are restored (or a config this run created is removed), and nothing is
+ * recorded as active. Never restarts a running nginx
+ * and never touches an unverified one.
  *
  * @param options - Manifest with `hostnames` settings, router settings, host and progress writer.
  * @returns `adopted` (current and active, or reloaded), `started`, or `failed` with the reason;
@@ -291,14 +397,20 @@ export function LocalEdgeKit_routerUp(options: {
 }): LocalEdgeKit_SupervisorStepResult {
   const { host, router, out } = options;
   const id = LOCAL_EDGE_KIT_ROUTER_ID;
-  const fail = (message: string): LocalEdgeKit_SupervisorStepResult => ({ appId: id, ok: false, action: "failed", message });
+  const fail = (message: string, errors: readonly string[] = []): LocalEdgeKit_SupervisorStepResult => ({
+    appId: id,
+    ok: false,
+    action: "failed",
+    message,
+    ...(errors.length > 0 ? { errors } : {}),
+  });
   let settings: LocalEdgeCore_ExposureHostnamesConfig;
   try {
     settings = LocalEdgeKit_requireHostnames(options.manifest);
   } catch (error) {
     return fail((error as Error).message);
   }
-  const rendered = LocalEdgeKit_tryRender(options.manifest);
+  const rendered = LocalEdgeKit_tryRender(options.manifest, router);
   if ("error" in rendered) {
     return fail(rendered.error);
   }
@@ -332,55 +444,146 @@ export function LocalEdgeKit_routerUp(options: {
       }
       host.writeText(nginx.confPath, rendered.text, { ...root, mode: 0o600 });
       out.write(`[${id}] wrote ${nginx.confPath}\n`);
+    } else {
+      // Unchanged but not confirmed active: check the file itself before asking nginx to load it.
+      const tested = LocalEdgeKit_runNginx(host, bin, ["-t", "-q", "-c", nginx.confPath]);
+      if (tested !== null) {
+        return fail(`config on disk failed the check, nginx not signalled: ${tested}`);
+      }
     }
   } catch (error) {
     return fail((error as Error).message);
   }
 
-  const restore = (reason: string): LocalEdgeKit_SupervisorStepResult => {
-    if (!changed) {
-      return fail(reason);
-    }
-    try {
-      if (previous === null) {
-        host.removeFile(nginx.confPath);
-      } else {
-        host.writeText(nginx.confPath, previous, { ...root, mode: 0o600 });
+  const confirmMs = router.confirm?.timeoutMs ?? 5000;
+  /** Polls the marker until it answers the new render's hash; returns null when it did. */
+  const confirm = (): string | null => {
+    const deadline = host.now() + confirmMs;
+    let last: string | null = null;
+    for (;;) {
+      last = host.fetchUnixSocketText(rendered.socketPath, LOCAL_EDGE_KIT_ROUTER_MARKER_PATH, 1000);
+      if (last?.trim() === rendered.markerSha) {
+        return null;
       }
-      return fail(`${reason}; previous config restored`);
-    } catch (error) {
-      return fail(`${reason}; restoring the previous config also failed: ${(error as Error).message}`);
+      if (host.now() >= deadline) {
+        const seen = last === null ? "no answer" : `hash ${last.trim().slice(0, 12)}`;
+        return `nginx did not confirm the new config within ${String(confirmMs)} ms (marker gave ${seen}, expected ${rendered.markerSha.slice(0, 12)})`;
+      }
+      host.sleepSync(200);
     }
+  };
+  /**
+   * The one rollback for every failure after the file may have been replaced, on the reload and
+   * the start path alike:
+   * 1. `stop`: quit the nginx this run started (it was verified ours by identity, and the
+   *    identity is read again before the signal), so no router keeps running a config that was
+   *    never confirmed;
+   * 2. `unconfirmed`: record that pid with no active config, so the next run signals again
+   *    instead of adopting;
+   * 3. put the previous bytes back, or remove a config this run created.
+   *
+   * Every step is best-effort: each runs even when an earlier one failed or threw, and every
+   * failure is kept in the result's `errors` (and spelled out in the message), so the caller gets
+   * the structured failure and never an exception.
+   */
+  const rollBack = (
+    reason: string,
+    steps: { unconfirmed?: { pid: number; identity: LocalEdgeKit_ProcessIdentity } | undefined; stop?: boolean | undefined } = {},
+  ): LocalEdgeKit_SupervisorStepResult => {
+    const notes: string[] = [];
+    const errors: string[] = [];
+    const failed = (what: string, error: unknown): void => {
+      const text = `${what}: ${error instanceof Error ? error.message : String(error)}`;
+      notes.push(text);
+      errors.push(text);
+    };
+    if (steps.unconfirmed) {
+      const { pid, identity } = steps.unconfirmed;
+      if (steps.stop) {
+        try {
+          const quit = LocalEdgeKit_quitVerifiedRouter(host, router, pid, identity);
+          if (quit.error === null) {
+            notes.push(`nginx pid ${String(pid)} it started was stopped`);
+          } else {
+            failed("stopping the nginx it started failed", quit.error);
+          }
+          if (quit.stateError !== null) {
+            failed("removing the router state file also failed", quit.stateError);
+          }
+        } catch (error) {
+          failed("stopping the nginx it started failed", error);
+        }
+      }
+      try {
+        LocalEdgeKit_writeRouterState(host, router, { pid, identity, activeConfigSha256: null });
+        notes.push("not recorded as active");
+      } catch (error) {
+        failed("recording it as not active failed", error);
+      }
+    }
+    if (changed) {
+      try {
+        if (previous === null) {
+          host.removeFile(nginx.confPath);
+          notes.push("the config it created was removed");
+        } else {
+          host.writeText(nginx.confPath, previous, { ...root, mode: 0o600 });
+          notes.push("previous config restored");
+        }
+      } catch (error) {
+        failed("restoring the previous config also failed", error);
+      }
+    }
+    return fail([reason, ...notes].join("; "), errors);
   };
 
   if (owner.kind === "ours") {
     const reloaded = LocalEdgeKit_signalVerified(host, owner.pid, owner.identity, "SIGHUP");
     if (reloaded !== null) {
-      return restore(`reload failed: ${reloaded}`);
+      return rollBack(`reload failed: ${reloaded}`);
+    }
+    const unconfirmed = confirm();
+    if (unconfirmed !== null) {
+      return rollBack(`reload not activated: ${unconfirmed}`, { unconfirmed: { pid: owner.pid, identity: owner.identity } });
     }
     try {
       LocalEdgeKit_writeRouterState(host, router, { pid: owner.pid, identity: owner.identity, activeConfigSha256: sha });
     } catch (error) {
-      return fail(`nginx reloaded but its state could not be recorded: ${(error as Error).message}`);
+      return fail(
+        `nginx reloaded but its state could not be recorded: ${(error as Error).message}; nginx pid ${String(owner.pid)} is still running and the confirmed new config stays active and in place (nothing was rolled back); the next run will reload it again and record the state`,
+        [(error as Error).message],
+      );
     }
     return { appId: id, ok: true, action: "adopted", message: `nginx pid ${String(owner.pid)} reloaded with the new config` };
   }
+  // No nginx runs: a socket file left by a crashed one would block the marker listener.
+  host.removeFile(rendered.socketPath);
   const started = LocalEdgeKit_runNginx(host, bin, ["-c", nginx.confPath]);
   if (started !== null) {
-    return restore(started);
+    return rollBack(started);
   }
   const newPid = LocalEdgeKit_readPidFile(host, nginx.pidPath);
   const identity = newPid === null ? null : host.processIdentity(newPid);
   if (newPid === null || identity === null) {
-    return restore("nginx returned 0 but its pid file names no live process");
+    return rollBack("nginx returned 0 but its pid file names no live process");
   }
   if (!LocalEdgeKit_looksLikeOurNginx(host, identity, nginx.confPath)) {
-    return fail(`nginx returned 0 but pid ${String(newPid)} is not an nginx master for this config; not recorded`);
+    return rollBack(`nginx returned 0 but pid ${String(newPid)} is not an nginx master for this config; not recorded or signalled`);
+  }
+  const unconfirmedStart = confirm();
+  if (unconfirmedStart !== null) {
+    return rollBack(`nginx pid ${String(newPid)} started but not activated: ${unconfirmedStart}`, {
+      unconfirmed: { pid: newPid, identity },
+      stop: true,
+    });
   }
   try {
     LocalEdgeKit_writeRouterState(host, router, { pid: newPid, identity, activeConfigSha256: sha });
   } catch (error) {
-    return fail(`nginx started but its state could not be recorded: ${(error as Error).message}`);
+    return fail(
+      `nginx started but its state could not be recorded: ${(error as Error).message}; nginx pid ${String(newPid)} is still running and the confirmed new config stays active and in place (nothing was rolled back); the next run will reload it again and record the state`,
+      [(error as Error).message],
+    );
   }
   return { appId: id, ok: true, action: "started", message: `nginx pid ${String(newPid)} on ${settings.routerHost}:${String(settings.routerPort)}` };
 }
@@ -413,24 +616,47 @@ export function LocalEdgeKit_routerDown(options: {
   if (owner.kind === "unverified") {
     return { appId: id, ok: false, action: "failed", message: `not stopping: ${owner.message}` };
   }
-  const quit = LocalEdgeKit_signalVerified(host, owner.pid, owner.identity, "SIGQUIT");
+  const quit = LocalEdgeKit_quitVerifiedRouter(host, router, owner.pid, owner.identity);
+  const errors = [quit.error, quit.stateError === null ? null : `removing the router state file failed: ${quit.stateError}`].filter((e): e is string => e !== null);
+  return {
+    appId: id,
+    ok: quit.error === null,
+    action: quit.error === null ? "stopped" : "failed",
+    message: quit.error ?? [`nginx pid ${String(owner.pid)} quit`, ...errors].join("; "),
+    ...(errors.length > 0 ? { errors } : {}),
+  };
+}
+
+/**
+ * Sends SIGQUIT to a verified nginx (identity read again right before the signal) and waits up
+ * to `stopTimeoutMs` for it to exit; then removes the state file. A state file that cannot be
+ * removed does not undo the stop: it is reported in `stateError` and left to the caller.
+ *
+ * @returns `error` is null when it quit, otherwise why not; `stateError` is why the state file
+ * could not be removed after a quit, otherwise null.
+ */
+function LocalEdgeKit_quitVerifiedRouter(
+  host: LocalEdgeKit_SupervisorHost,
+  router: LocalEdgeKit_SupervisorRouterConfig,
+  pid: number,
+  identity: LocalEdgeKit_ProcessIdentity,
+): { error: string | null; stateError: string | null } {
+  const quit = LocalEdgeKit_signalVerified(host, pid, identity, "SIGQUIT");
   if (quit !== null) {
-    return { appId: id, ok: false, action: "failed", message: quit };
+    return { error: quit, stateError: null };
   }
-  const stillOurs = () =>
-    LocalEdgeKit_verifyProcessIdentity({ pid: owner.pid, recorded: owner.identity, current: host.processIdentity(owner.pid) }).ok;
+  const stillOurs = () => LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
   const deadline = host.now() + (router.stopTimeoutMs ?? 10_000);
   while (stillOurs() && host.now() < deadline) {
     host.sleepSync(200);
   }
-  const stopped = !stillOurs();
-  if (stopped) {
-    host.removeFile(LocalEdgeKit_routerStatePath(router));
+  if (stillOurs()) {
+    return { error: "nginx still running after quit", stateError: null };
   }
-  return {
-    appId: id,
-    ok: stopped,
-    action: stopped ? "stopped" : "failed",
-    message: stopped ? `nginx pid ${String(owner.pid)} quit` : "nginx still running after quit",
-  };
+  try {
+    host.removeFile(LocalEdgeKit_routerStatePath(router));
+  } catch (error) {
+    return { error: null, stateError: error instanceof Error ? error.message : String(error) };
+  }
+  return { error: null, stateError: null };
 }
