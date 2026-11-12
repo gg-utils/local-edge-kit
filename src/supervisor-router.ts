@@ -397,7 +397,13 @@ export function LocalEdgeKit_routerUp(options: {
 }): LocalEdgeKit_SupervisorStepResult {
   const { host, router, out } = options;
   const id = LOCAL_EDGE_KIT_ROUTER_ID;
-  const fail = (message: string): LocalEdgeKit_SupervisorStepResult => ({ appId: id, ok: false, action: "failed", message });
+  const fail = (message: string, errors: readonly string[] = []): LocalEdgeKit_SupervisorStepResult => ({
+    appId: id,
+    ok: false,
+    action: "failed",
+    message,
+    ...(errors.length > 0 ? { errors } : {}),
+  });
   let settings: LocalEdgeCore_ExposureHostnamesConfig;
   try {
     settings = LocalEdgeKit_requireHostnames(options.manifest);
@@ -475,22 +481,44 @@ export function LocalEdgeKit_routerUp(options: {
    * 2. `unconfirmed`: record that pid with no active config, so the next run signals again
    *    instead of adopting;
    * 3. put the previous bytes back, or remove a config this run created.
+   *
+   * Every step is best-effort: each runs even when an earlier one failed or threw, and every
+   * failure is kept in the result's `errors` (and spelled out in the message), so the caller gets
+   * the structured failure and never an exception.
    */
   const rollBack = (
     reason: string,
     steps: { unconfirmed?: { pid: number; identity: LocalEdgeKit_ProcessIdentity } | undefined; stop?: boolean | undefined } = {},
   ): LocalEdgeKit_SupervisorStepResult => {
     const notes: string[] = [];
+    const errors: string[] = [];
+    const failed = (what: string, error: unknown): void => {
+      const text = `${what}: ${error instanceof Error ? error.message : String(error)}`;
+      notes.push(text);
+      errors.push(text);
+    };
     if (steps.unconfirmed) {
+      const { pid, identity } = steps.unconfirmed;
       if (steps.stop) {
-        const quit = LocalEdgeKit_quitVerifiedRouter(host, router, steps.unconfirmed.pid, steps.unconfirmed.identity);
-        notes.push(quit === null ? `nginx pid ${String(steps.unconfirmed.pid)} it started was stopped` : `stopping the nginx it started failed: ${quit}`);
+        try {
+          const quit = LocalEdgeKit_quitVerifiedRouter(host, router, pid, identity);
+          if (quit.error === null) {
+            notes.push(`nginx pid ${String(pid)} it started was stopped`);
+          } else {
+            failed("stopping the nginx it started failed", quit.error);
+          }
+          if (quit.stateError !== null) {
+            failed("removing the router state file also failed", quit.stateError);
+          }
+        } catch (error) {
+          failed("stopping the nginx it started failed", error);
+        }
       }
       try {
-        LocalEdgeKit_writeRouterState(host, router, { pid: steps.unconfirmed.pid, identity: steps.unconfirmed.identity, activeConfigSha256: null });
+        LocalEdgeKit_writeRouterState(host, router, { pid, identity, activeConfigSha256: null });
         notes.push("not recorded as active");
       } catch (error) {
-        notes.push(`recording it as not active failed: ${(error as Error).message}`);
+        failed("recording it as not active failed", error);
       }
     }
     if (changed) {
@@ -503,10 +531,10 @@ export function LocalEdgeKit_routerUp(options: {
           notes.push("previous config restored");
         }
       } catch (error) {
-        notes.push(`restoring the previous config also failed: ${(error as Error).message}`);
+        failed("restoring the previous config also failed", error);
       }
     }
-    return fail([reason, ...notes].join("; "));
+    return fail([reason, ...notes].join("; "), errors);
   };
 
   if (owner.kind === "ours") {
@@ -521,7 +549,10 @@ export function LocalEdgeKit_routerUp(options: {
     try {
       LocalEdgeKit_writeRouterState(host, router, { pid: owner.pid, identity: owner.identity, activeConfigSha256: sha });
     } catch (error) {
-      return fail(`nginx reloaded but its state could not be recorded: ${(error as Error).message}`);
+      return fail(
+        `nginx reloaded but its state could not be recorded: ${(error as Error).message}; nginx pid ${String(owner.pid)} is still running and the confirmed new config stays active and in place (nothing was rolled back); the next run will reload it again and record the state`,
+        [(error as Error).message],
+      );
     }
     return { appId: id, ok: true, action: "adopted", message: `nginx pid ${String(owner.pid)} reloaded with the new config` };
   }
@@ -549,7 +580,10 @@ export function LocalEdgeKit_routerUp(options: {
   try {
     LocalEdgeKit_writeRouterState(host, router, { pid: newPid, identity, activeConfigSha256: sha });
   } catch (error) {
-    return fail(`nginx started but its state could not be recorded: ${(error as Error).message}`);
+    return fail(
+      `nginx started but its state could not be recorded: ${(error as Error).message}; nginx pid ${String(newPid)} is still running and the confirmed new config stays active and in place (nothing was rolled back); the next run will reload it again and record the state`,
+      [(error as Error).message],
+    );
   }
   return { appId: id, ok: true, action: "started", message: `nginx pid ${String(newPid)} on ${settings.routerHost}:${String(settings.routerPort)}` };
 }
@@ -583,29 +617,33 @@ export function LocalEdgeKit_routerDown(options: {
     return { appId: id, ok: false, action: "failed", message: `not stopping: ${owner.message}` };
   }
   const quit = LocalEdgeKit_quitVerifiedRouter(host, router, owner.pid, owner.identity);
+  const errors = [quit.error, quit.stateError === null ? null : `removing the router state file failed: ${quit.stateError}`].filter((e): e is string => e !== null);
   return {
     appId: id,
-    ok: quit === null,
-    action: quit === null ? "stopped" : "failed",
-    message: quit ?? `nginx pid ${String(owner.pid)} quit`,
+    ok: quit.error === null,
+    action: quit.error === null ? "stopped" : "failed",
+    message: quit.error ?? [`nginx pid ${String(owner.pid)} quit`, ...errors].join("; "),
+    ...(errors.length > 0 ? { errors } : {}),
   };
 }
 
 /**
  * Sends SIGQUIT to a verified nginx (identity read again right before the signal) and waits up
- * to `stopTimeoutMs` for it to exit; removes the state file once it has.
+ * to `stopTimeoutMs` for it to exit; then removes the state file. A state file that cannot be
+ * removed does not undo the stop: it is reported in `stateError` and left to the caller.
  *
- * @returns null when it quit, otherwise why not.
+ * @returns `error` is null when it quit, otherwise why not; `stateError` is why the state file
+ * could not be removed after a quit, otherwise null.
  */
 function LocalEdgeKit_quitVerifiedRouter(
   host: LocalEdgeKit_SupervisorHost,
   router: LocalEdgeKit_SupervisorRouterConfig,
   pid: number,
   identity: LocalEdgeKit_ProcessIdentity,
-): string | null {
+): { error: string | null; stateError: string | null } {
   const quit = LocalEdgeKit_signalVerified(host, pid, identity, "SIGQUIT");
   if (quit !== null) {
-    return quit;
+    return { error: quit, stateError: null };
   }
   const stillOurs = () => LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
   const deadline = host.now() + (router.stopTimeoutMs ?? 10_000);
@@ -613,8 +651,12 @@ function LocalEdgeKit_quitVerifiedRouter(
     host.sleepSync(200);
   }
   if (stillOurs()) {
-    return "nginx still running after quit";
+    return { error: "nginx still running after quit", stateError: null };
   }
-  host.removeFile(LocalEdgeKit_routerStatePath(router));
-  return null;
+  try {
+    host.removeFile(LocalEdgeKit_routerStatePath(router));
+  } catch (error) {
+    return { error: null, stateError: error instanceof Error ? error.message : String(error) };
+  }
+  return { error: null, stateError: null };
 }

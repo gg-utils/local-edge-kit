@@ -201,6 +201,8 @@ export type LocalEdgeKit_SupervisorStepResult = {
   ok: boolean;
   action: "started" | "adopted" | "stopped" | "already-stopped" | "skipped" | "failed";
   message: string;
+  /** Router only: every failed rollback or cleanup step on this result, in order. Absent when none failed. */
+  errors?: readonly string[];
 };
 
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS = 60_000;

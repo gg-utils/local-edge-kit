@@ -181,6 +181,8 @@ export type LocalEdgeKit_SupervisorStepResult = {
     ok: boolean;
     action: "started" | "adopted" | "stopped" | "already-stopped" | "skipped" | "failed";
     message: string;
+    /** Router only: every failed rollback or cleanup step on this result, in order. Absent when none failed. */
+    errors?: readonly string[];
 };
 /**
  * Real host effects: `ps`/`lsof` for inspection, `process.kill` for signals, `safe-write.ts` for

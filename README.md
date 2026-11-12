@@ -137,7 +137,11 @@ config carries a loopback-only marker: a server on the unix socket
 (`router.confirm.timeoutMs`, default 5 s) and records the config as active only once it answers
 the new hash. If the reload or start fails or is not confirmed, the previous config bytes are put
 back (a config this run created is removed), an nginx this run started is stopped with SIGQUIT,
-and nothing is recorded as active, so the next `up` tries again. The router counts as ours only when
+and nothing is recorded as active, so the next `up` tries again. Each rollback step (stop, record
+not active, restore or remove the config) runs even when an earlier one failed, and the failures are
+listed in the failed result's `errors`. If nginx confirmed the new config but its state file cannot
+be written, nothing is rolled back: nginx keeps running the confirmed config, the file stays in
+place, `up` reports a failure that says so, and the next `up` reloads it and records the state. The router counts as ours only when
 the pid in nginx's pid file matches the identity recorded in `<stateRoot>/router.state.json`, or
 is an `nginx: master process` of our user whose single `-c` value is the same file as this config
 after resolving symlinks on both sides (a longer name, a prefix or a suffix never matches); any
