@@ -387,7 +387,9 @@ function LocalEdgeKit_runNginx(host: LocalEdgeKit_SupervisorHost, bin: string, a
  * step, and a host call that threw once the config may have been replaced, is also listed in
  * `errors` (absent when none failed), in rollback order. A confirmed activation whose state file
  * cannot be written is `failed` with that error in `errors`, while nginx keeps running the
- * confirmed config. Once the config may have been replaced it never throws; a host read that
+ * confirmed config. An nginx this run started whose identity could not be confirmed after a host
+ * call threw is left running: it is named in `errors` and the message (with its pid when known) and
+ * is not recorded. Once the config may have been replaced it never throws; a host read that
  * fails before anything is changed (the config, the pid file) can still throw, with nothing
  * changed.
  * @example
@@ -449,7 +451,9 @@ export function LocalEdgeKit_routerUp(options: {
    * Every step is best-effort: each runs even when an earlier one failed or threw, and every
    * failure is kept in the result's `errors` (and spelled out in the message), so the caller gets
    * the structured failure and never an exception. `thrown` is an exception that interrupted the
-   * activation itself (a host call that threw); it is listed first in `errors`.
+   * activation itself (a host call that threw); it is listed first in `errors`. `unidentified` is
+   * an nginx this run started but could not identify: it is neither stopped nor recorded, and the
+   * result says so (with the pid when known) and what to check.
    */
   const rollBack = (
     reason: string,
@@ -457,6 +461,8 @@ export function LocalEdgeKit_routerUp(options: {
       unconfirmed?: { pid: number; identity: LocalEdgeKit_ProcessIdentity } | undefined;
       stop?: boolean | undefined;
       thrown?: unknown;
+      /** An nginx this run started whose identity could not be confirmed, so it was left running. */
+      unidentified?: { pid: number | null } | undefined;
     } = {},
   ): LocalEdgeKit_SupervisorStepResult => {
     const notes: string[] = [];
@@ -468,6 +474,12 @@ export function LocalEdgeKit_routerUp(options: {
     };
     if ("thrown" in steps) {
       failed("a host call failed", steps.thrown);
+    }
+    if (steps.unidentified) {
+      const { pid } = steps.unidentified;
+      const text = `an nginx started by this run may still be running${pid === null ? " (its pid is unknown)" : ` (pid ${String(pid)})`}; its identity could not be confirmed, so it was not stopped and not recorded as active. Check ${nginx.pidPath} and the process list for an nginx master started with -c ${nginx.confPath}, and stop it with SIGQUIT if it is yours; the next up adopts a verified one and reloads it`;
+      notes.push(text);
+      errors.push(text);
     }
     if (steps.unconfirmed) {
       const { pid, identity } = steps.unconfirmed;
@@ -558,6 +570,27 @@ export function LocalEdgeKit_routerUp(options: {
   // true, so a host call that throws later (the marker poll, say) still stops what this run
   // started and records it as not active.
   let pending: { unconfirmed: { pid: number; identity: LocalEdgeKit_ProcessIdentity }; stop: boolean } | undefined;
+  // Set once `nginx -c` returned 0 and cleared when `pending` is set: the window in which a
+  // started nginx exists but is not yet identified. `pid` is the pid file's value, when it was read.
+  let starting: { pid: number | null } | undefined;
+  /**
+   * After a throw inside that window, tries once more to identify the started nginx (pid file,
+   * identity, nginx-master-for-this-config check). Identified: the verified-quit path can stop it.
+   * Otherwise it is reported as possibly still running, with the pid when it is known.
+   */
+  const identifyStarted = (known: number | null): Pick<NonNullable<Parameters<typeof rollBack>[1]>, "unconfirmed" | "stop" | "unidentified"> => {
+    let pid = known;
+    try {
+      pid ??= LocalEdgeKit_readPidFile(host, nginx.pidPath);
+      const identity = pid === null ? null : host.processIdentity(pid);
+      if (pid !== null && identity !== null && LocalEdgeKit_looksLikeOurNginx(host, identity, nginx.confPath)) {
+        return { unconfirmed: { pid, identity }, stop: true };
+      }
+    } catch {
+      // The read that failed the first time failed again: it stays unidentified.
+    }
+    return { unidentified: { pid } };
+  };
   const activate = (): LocalEdgeKit_SupervisorStepResult => {
     if (owner.kind === "ours") {
       const reloaded = LocalEdgeKit_signalVerified(host, owner.pid, owner.identity, "SIGHUP");
@@ -585,7 +618,9 @@ export function LocalEdgeKit_routerUp(options: {
     if (started !== null) {
       return rollBack(started);
     }
+    starting = { pid: null };
     const newPid = LocalEdgeKit_readPidFile(host, nginx.pidPath);
+    starting.pid = newPid;
     const identity = newPid === null ? null : host.processIdentity(newPid);
     if (newPid === null || identity === null) {
       return rollBack("nginx returned 0 but its pid file names no live process");
@@ -594,6 +629,7 @@ export function LocalEdgeKit_routerUp(options: {
       return rollBack(`nginx returned 0 but pid ${String(newPid)} is not an nginx master for this config; not recorded or signalled`);
     }
     pending = { unconfirmed: { pid: newPid, identity }, stop: true };
+    starting = undefined;
     const unconfirmedStart = confirm();
     if (unconfirmedStart !== null) {
       return rollBack(`nginx pid ${String(newPid)} started but not activated: ${unconfirmedStart}`, pending);
@@ -611,7 +647,7 @@ export function LocalEdgeKit_routerUp(options: {
   try {
     return activate();
   } catch (error) {
-    return rollBack("activation was interrupted", { ...pending, thrown: error });
+    return rollBack("activation was interrupted", { ...(pending ?? (starting ? identifyStarted(starting.pid) : {})), thrown: error });
   }
 }
 
@@ -624,8 +660,11 @@ export function LocalEdgeKit_routerUp(options: {
  * @returns `already-stopped`, `stopped`, or `failed` with the reason. A stopped router whose
  * state file could not be removed is still `ok: true` with action `stopped`; the removal error is
  * in `errors` and the message, and the next `up` starts nginx normally. A host call that throws
- * while stopping gives `ok: false` with that error in `errors`.
- * @throws When the manifest has no `hostnames` settings.
+ * while stopping gives `ok: false` with that error in `errors`. The reads before the signal (the
+ * pid file, the state file, the process identity) are not caught: if one fails the call throws,
+ * and nothing has been signalled, stopped or removed.
+ * @throws When the manifest has no `hostnames` settings, or when a read before the signal (pid
+ * file, state, identity) fails; in both cases nothing has been changed.
  * @example
  * ```typescript
  * LocalEdgeKit_routerDown({ manifest, router: { stateRoot: "/w/state" }, host });
