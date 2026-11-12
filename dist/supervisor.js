@@ -7,7 +7,10 @@
  * group, so processes started by someone else are adopted instead of started twice. A port held
  * by anything else is reported as busy and never killed. Stop signals the app's process group
  * (SIGTERM, then SIGKILL after a timeout) through the core runtime-stop helper.
- * Env checks read names only: values are never returned or printed.
+ * Env checks read names only: values are never returned or printed. Launch env values go to the
+ * started process only; output lists their names. External apps are route only: never started,
+ * stopped or signalled. Pid files are written atomically and log files opened without following
+ * symlinks, both inside the app's cwd.
  * Flow: config -> validate + dependency order -> inspect (pid file + port) -> start/stop/health.
  *
  * @testing Node test runner (tsx): npm run test -- src/supervisor.unit.test.ts
@@ -17,10 +20,11 @@
  * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { LocalEdgeCore_isHealthyHttpStatusCode } from "@gg-utils/local-edge-core/healthcheck";
 import { LocalEdgeCore_runtimeStopParsePidLines, LocalEdgeCore_runtimeStopTerminatePidList, } from "@gg-utils/local-edge-core/runtime-stop";
+import { LocalEdgeKit_openAppendSafe, LocalEdgeKit_prepareSafeTarget, LocalEdgeKit_writeFileAtomic } from "./safe-write.js";
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS = 60_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS = 10_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_POLL_MS = 500;
@@ -40,9 +44,13 @@ export function LocalEdgeKit_createSupervisorHost() {
     };
     return {
         readText: (filePath) => (existsSync(filePath) ? readFileSync(filePath, "utf8") : null),
-        writeText: (filePath, text) => {
-            mkdirSync(path.dirname(filePath), { recursive: true });
-            writeFileSync(filePath, text);
+        writeText: (filePath, text, options) => LocalEdgeKit_writeFileAtomic(filePath, text, options),
+        ensureDir: (dirPath, options) => {
+            LocalEdgeKit_prepareSafeTarget(path.join(dirPath, ".probe"), options);
+        },
+        runCommand: (command, args) => {
+            const result = spawnSync(command, [...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
+            return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
         },
         removeFile: (filePath) => rmSync(filePath, { force: true }),
         fileSize: (filePath) => (existsSync(filePath) ? statSync(filePath).size : 0),
@@ -80,13 +88,12 @@ export function LocalEdgeKit_createSupervisorHost() {
             }
         },
         spawnDetached: (options) => {
-            mkdirSync(path.dirname(options.logFile), { recursive: true });
-            const fd = openSync(options.logFile, "a");
+            const fd = LocalEdgeKit_openAppendSafe(options.logFile, { root: options.logRoot });
             try {
                 const child = spawn(options.command, [...options.args], {
                     cwd: options.cwd,
                     detached: true,
-                    env: process.env,
+                    env: { ...process.env, ...options.env },
                     stdio: ["ignore", fd, fd],
                 });
                 child.unref();
@@ -129,8 +136,13 @@ export function LocalEdgeKit_validateSupervisedApps(apps) {
         if (!app.enabled) {
             continue;
         }
-        if (!app.cwd || !app.command) {
-            problems.push(`${app.id}: enabled apps need cwd and command`);
+        if (app.external === true) {
+            if (app.command !== undefined) {
+                problems.push(`${app.id}: external apps are route only and may not set command`);
+            }
+        }
+        else if (!app.cwd || !app.command || !app.pidFile || !app.logFile) {
+            problems.push(`${app.id}: enabled apps need cwd, command, pidFile and logFile`);
         }
         const other = ports.get(app.localPort);
         if (other !== undefined) {
@@ -249,7 +261,17 @@ export function LocalEdgeKit_inspectSupervisedApp(app, host) {
         const busy = listenerPids.length > 0 ? `; port ${String(app.localPort)} is in use` : "";
         return { ...base, state: "disabled", pid: null, processGroup: null, note: `${app.disabledReason ?? "disabled"}${busy}` };
     }
-    const pid = LocalEdgeKit_readPidFile(host, LocalEdgeKit_resolveAppPath(app, app.pidFile));
+    if (app.external === true) {
+        const listening = listenerPids.length > 0;
+        return {
+            ...base,
+            state: "external",
+            pid: null,
+            processGroup: null,
+            note: `route only; port ${listening ? "listening" : "not listening"}`,
+        };
+    }
+    const pid = app.pidFile ? LocalEdgeKit_readPidFile(host, LocalEdgeKit_resolveAppPath(app, app.pidFile)) : null;
     const alive = pid !== null && host.pidIsAlive(pid);
     const processGroup = alive ? host.processGroupOf(pid) : null;
     if (alive) {
@@ -280,7 +302,7 @@ export async function LocalEdgeKit_probeSupervisedAppHealth(app, host, timeoutMs
     return { appId: app.id, healthy: checks.every((check) => check.ok), checks };
 }
 function LocalEdgeKit_logContainsSince(app, host, offset) {
-    if (!app.readyLogLine) {
+    if (!app.readyLogLine || !app.logFile) {
         return true;
     }
     const text = host.readText(LocalEdgeKit_resolveAppPath(app, app.logFile)) ?? "";
@@ -328,6 +350,10 @@ export async function LocalEdgeKit_supervisorUp(options) {
             results.push({ appId: app.id, ok: true, action: "skipped", message: app.disabledReason ?? "disabled" });
             continue;
         }
+        if (app.external === true) {
+            results.push({ appId: app.id, ok: true, action: "skipped", message: "external: route only, never started" });
+            continue;
+        }
         const timeoutMs = app.startTimeoutMs ?? LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS;
         const inspection = LocalEdgeKit_inspectSupervisedApp(app, host);
         if (inspection.state === "running" || inspection.state === "starting") {
@@ -342,24 +368,45 @@ export async function LocalEdgeKit_supervisorUp(options) {
             failed = true;
             continue;
         }
+        let launchEnv;
+        try {
+            launchEnv = typeof app.launchEnv === "function" ? app.launchEnv() : (app.launchEnv ?? {});
+        }
+        catch (error) {
+            results.push({
+                appId: app.id,
+                ok: false,
+                action: "failed",
+                message: `launch env unavailable: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            failed = true;
+            continue;
+        }
+        const launchNames = Object.keys(launchEnv);
         const missing = LocalEdgeKit_missingEnvNames({
             envText: app.envFile ? host.readText(LocalEdgeKit_resolveAppPath(app, app.envFile)) : null,
-            requiredNames: app.requiredEnvNames ?? [],
+            requiredNames: (app.requiredEnvNames ?? []).filter((name) => !launchNames.includes(name)),
         });
         if (missing.length > 0) {
             results.push({ appId: app.id, ok: false, action: "failed", message: `env file lacks: ${missing.join(", ")}` });
             failed = true;
             continue;
         }
-        const logFile = LocalEdgeKit_resolveAppPath(app, app.logFile);
+        const root = app.cwd ?? process.cwd();
+        const logFile = LocalEdgeKit_resolveAppPath(app, app.logFile ?? "");
         const logOffset = host.fileSize(logFile);
+        if (launchNames.length > 0) {
+            out.write(`[${app.id}] launch env: ${launchNames.join(", ")}\n`);
+        }
         const pid = host.spawnDetached({
-            cwd: app.cwd ?? process.cwd(),
+            cwd: root,
             command: app.command ?? "",
             args: app.args ?? [],
             logFile,
+            logRoot: root,
+            env: launchEnv,
         });
-        host.writeText(LocalEdgeKit_resolveAppPath(app, app.pidFile), `${String(pid)}\n`);
+        host.writeText(LocalEdgeKit_resolveAppPath(app, app.pidFile ?? ""), `${String(pid)}\n`, { root });
         out.write(`[${app.id}] started pid ${String(pid)}, waiting for health\n`);
         const ready = await LocalEdgeKit_waitForSupervisedAppReady({ app, host, logOffset, timeoutMs, pid });
         results.push({ appId: app.id, ok: ready.ready, action: ready.ready ? "started" : "failed", message: ready.message });
@@ -380,6 +427,9 @@ export function LocalEdgeKit_supervisorDown(options) {
     return ordered.map((app) => {
         if (!app.enabled) {
             return { appId: app.id, ok: true, action: "skipped", message: app.disabledReason ?? "disabled" };
+        }
+        if (app.external === true || !app.pidFile) {
+            return { appId: app.id, ok: true, action: "skipped", message: "external: route only, never signalled" };
         }
         const inspection = LocalEdgeKit_inspectSupervisedApp(app, host);
         const pidFile = LocalEdgeKit_resolveAppPath(app, app.pidFile);

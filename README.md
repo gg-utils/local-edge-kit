@@ -84,8 +84,8 @@ flowchart TD
 
 `@gg-utils/local-edge-kit/supervisor-cli` runs a set of loopback apps from one command and
 exposes them through a core exposure backend. Set `exposure.backend` to `ports` (the default:
-one tailnet HTTPS port per app) or `hostnames` (plan-only SNI hosts, configured by
-`exposure.hostnames`). `--backend=<name>` overrides the choice for one command.
+one tailnet HTTPS port per app) or `hostnames` (one public name per app under one wildcard,
+routed by SNI through a loopback nginx, configured by `exposure.hostnames`). `--backend=<name>` overrides the choice for one command.
 
 ```ts
 import { LocalEdgeKit_runSupervisorCli } from "@gg-utils/local-edge-kit/supervisor-cli";
@@ -95,7 +95,10 @@ process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slic
 
 Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs, a loopback port,
 an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
-and `dependsOn`.
+and `dependsOn`. `launchEnv` (values, or a function called only when the app is started) is set
+over the supervisor's env for that process; it counts toward the required names and only its
+names are printed. `external: true` marks a route-only app: it is listed, probed and routed, but
+never started, stopped or signalled. `locations` adds extra path routes for the hostnames backend.
 
 | Command | What it does |
 |---|---|
@@ -110,7 +113,17 @@ and `dependsOn`.
 An app is adopted when its pid file names a live process and that process's group holds the
 port. Processes started by someone else are therefore never started twice. A port held by any
 other process is reported as `port-busy`, and the supervisor never signals that process. The env
-check reads names only and never returns or prints values.
+check reads names only and never returns or prints values. Pid files are written atomically
+(temp file, fsync, rename) inside the app's `cwd`, and log files are opened without following
+symlinks.
+
+With the `hostnames` backend and `exposure.router` set, `up` also renders the nginx config from
+the manifest. When it differs from the file on disk, a candidate file is checked with `nginx -t`
+before it replaces the real one, then a running nginx (adopted by its pid file) gets
+`-s reload`; nginx is started only when none runs, and never without the certificate and key.
+`down` sends `-s quit`. `status` adds a `router` row with the nginx pid and the Serve raw-TCP
+mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself is never
+changed by the supervisor.
 
 ## CLI
 

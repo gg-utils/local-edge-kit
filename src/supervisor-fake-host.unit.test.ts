@@ -11,7 +11,9 @@ import type { LocalEdgeKit_SupervisorHost } from "./supervisor.js";
 /** Fake host plus the recorded effects tests assert on. */
 export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   signals: { pid: number; signal: string | 0 }[];
-  spawned: { cwd: string; command: string; args: readonly string[] }[];
+  spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[];
+  commands: string[][];
+  dirs: string[];
   files: Map<string, string>;
   processes: Map<number, { pid: number; group: number; port?: number; parent?: number; alive: boolean }>;
 };
@@ -23,20 +25,34 @@ export function fakeHost(seed: {
   ownGroup?: number;
   healthy?: (url: string) => number | null;
   onSpawn?: (host: FakeSupervisorHost, pid: number) => void;
+  onCommand?: (
+    host: FakeSupervisorHost,
+    command: string,
+    args: readonly string[],
+  ) => { status: number | null; stdout: string; stderr: string } | undefined;
 } = {}): FakeSupervisorHost {
   const files = new Map(Object.entries(seed.files ?? {}));
   const processes = new Map((seed.processes ?? []).map((p) => [p.pid, { ...p, alive: true }]));
   const signals: { pid: number; signal: string | 0 }[] = [];
-  const spawned: { cwd: string; command: string; args: readonly string[] }[] = [];
+  const spawned: { cwd: string; command: string; args: readonly string[]; env?: Readonly<Record<string, string>> | undefined }[] = [];
+  const commands: string[][] = [];
+  const dirs: string[] = [];
   let clock = 0;
   let nextPid = 9000;
   const host: FakeSupervisorHost = {
     signals,
     spawned,
+    commands,
+    dirs,
     files,
     processes,
     readText: (filePath) => files.get(filePath) ?? null,
     writeText: (filePath, text) => void files.set(filePath, text),
+    ensureDir: (dirPath) => void dirs.push(dirPath),
+    runCommand: (command, args) => {
+      commands.push([command, ...args]);
+      return seed.onCommand?.(host, command, args) ?? { status: 0, stdout: "", stderr: "" };
+    },
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
