@@ -28,6 +28,7 @@ import {
   LocalEdgeCore_renderExposurePlanText,
 } from "@gg-utils/local-edge-core/exposure";
 
+import { type LocalEdgeKit_ExtraAppsSource, LocalEdgeKit_mergeExtraApps } from "./extra-apps.js";
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
 import {
   type LocalEdgeKit_SupervisorRouterConfig,
@@ -54,6 +55,11 @@ export type LocalEdgeKit_SupervisorConfig = {
   /** Command name shown in usage. */
   commandName?: string | undefined;
   apps: readonly LocalEdgeKit_SupervisedApp[];
+  /**
+   * Per-machine route-only apps merged with `apps` before every command, for example
+   * `LocalEdgeKit_createExtraAppsFileSource({ filePath })`. Duplicate ids or hosts are refused.
+   */
+  extraApps?: readonly LocalEdgeKit_ExtraAppsSource[] | undefined;
   exposure: {
     /**
      * Backend used when `--backend` is not given: `ports` (default, tailnet HTTPS port per app)
@@ -108,6 +114,21 @@ function LocalEdgeKit_parseSupervisorArgs(args: readonly string[]): ParsedArgs {
   return { positionals, flags };
 }
 
+/** Merges the config's extra-app sources into its apps; a config without sources is returned as is. */
+export function LocalEdgeKit_resolveSupervisorConfig(config: LocalEdgeKit_SupervisorConfig): LocalEdgeKit_SupervisorConfig {
+  if (config.extraApps === undefined || config.extraApps.length === 0) {
+    return config;
+  }
+  return {
+    ...config,
+    apps: LocalEdgeKit_mergeExtraApps({
+      apps: config.apps,
+      sources: config.extraApps,
+      hostnames: config.exposure.hostnames,
+    }),
+  };
+}
+
 /** Builds the backend-neutral exposure manifest from supervisor apps. */
 export function LocalEdgeKit_buildExposureManifest(
   config: LocalEdgeKit_SupervisorConfig,
@@ -125,6 +146,8 @@ export function LocalEdgeKit_buildExposureManifest(
       edgeName: app.edgeName,
       locations: app.locations,
       hostnameTemplate: app.hostnameTemplate,
+      host: app.host,
+      proxy: app.proxy,
     })),
   };
 }
@@ -177,7 +200,6 @@ function LocalEdgeKit_selectIds(config: LocalEdgeKit_SupervisorConfig, positiona
 export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSupervisorCliOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const { config } = options;
   const host = options.host ?? LocalEdgeKit_createSupervisorHost();
   const createBackend = options.createBackend ?? ((name: string) => LocalEdgeCore_createExposureBackend(name));
   const [command, ...rest] = options.args;
@@ -185,17 +207,25 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
   const json = parsed.flags.has("json");
   const backendFlag = parsed.flags.get("backend");
   const backendName =
-    typeof backendFlag === "string" ? backendFlag : (config.exposure.backend ?? LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND);
+    typeof backendFlag === "string" ? backendFlag : (options.config.exposure.backend ?? LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND);
 
   const usesRouter =
-    config.exposure.router !== undefined &&
+    options.config.exposure.router !== undefined &&
     LocalEdgeCore_resolveExposureBackendName(backendName) === LOCAL_EDGE_CORE_HOSTNAMES_BACKEND;
   const routerRequested = parsed.positionals.length === 0 || parsed.positionals.includes(LOCAL_EDGE_KIT_ROUTER_ID);
   const appPositionals = parsed.positionals.filter((id) => !usesRouter || id !== LOCAL_EDGE_KIT_ROUTER_ID);
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
-    stdout.write(LocalEdgeKit_supervisorUsage(config));
+    stdout.write(LocalEdgeKit_supervisorUsage(options.config));
     return command ? 0 : 2;
+  }
+
+  let config: LocalEdgeKit_SupervisorConfig;
+  try {
+    config = LocalEdgeKit_resolveSupervisorConfig(options.config);
+  } catch (error) {
+    stderr.write(`config invalid:\n  - ${error instanceof Error ? error.message : String(error)}\n`);
+    return 2;
   }
 
   const problems = LocalEdgeKit_validateSupervisedApps(config.apps);
@@ -244,6 +274,7 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
                   healthy: row.health?.healthy ?? null,
                   health: row.health?.checks ?? [],
                   note: row.inspection.note,
+                  source: row.app.source ?? "project",
                   edge: row.edge,
                 })),
               },
@@ -255,7 +286,7 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
           stdout.write(`exposure backend: ${backend.name}\n`);
           stdout.write(
             LocalEdgeKit_renderTable(
-              ["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "NOTE"],
+              ["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "SOURCE", "NOTE"],
               rows.map((row) => [
                 row.app.id,
                 row.inspection.state,
@@ -264,6 +295,7 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
                 row.health === null ? "-" : row.health.healthy ? "ok" : "fail",
                 row.edge?.edgeUrl ?? "-",
                 row.edge?.state ?? "-",
+                row.app.source ?? "project",
                 row.inspection.note,
               ]).concat(
                 router === null
@@ -277,6 +309,7 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
                         "-",
                         `serve :${String(router.edgePort)}`,
                         router.serve.state,
+                        "-",
                         `${router.inspection.note}; ${router.serve.note}`,
                       ],
                     ],

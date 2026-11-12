@@ -13,6 +13,7 @@
  * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { type LocalEdgeCore_ExposureBackend, type LocalEdgeCore_ExposureHostnamesConfig, type LocalEdgeCore_ExposureManifest } from "@gg-utils/local-edge-core/exposure";
+import { type LocalEdgeKit_ExtraAppsSource } from "./extra-apps.js";
 import { type LocalEdgeKit_SupervisorRouterConfig } from "./supervisor-router.js";
 import { type LocalEdgeKit_SupervisedApp, type LocalEdgeKit_SupervisorHost, type LocalEdgeKit_SupervisorWriter } from "./supervisor.js";
 /** Project-owned supervisor config. */
@@ -20,6 +21,11 @@ export type LocalEdgeKit_SupervisorConfig = {
     /** Command name shown in usage. */
     commandName?: string | undefined;
     apps: readonly LocalEdgeKit_SupervisedApp[];
+    /**
+     * Per-machine route-only apps merged with `apps` before every command, for example
+     * `LocalEdgeKit_createExtraAppsFileSource({ filePath })`. Duplicate ids or hosts are refused.
+     */
+    extraApps?: readonly LocalEdgeKit_ExtraAppsSource[] | undefined;
     exposure: {
         /**
          * Backend used when `--backend` is not given: `ports` (default, tailnet HTTPS port per app)
@@ -50,6 +56,8 @@ export type LocalEdgeKit_RunSupervisorCliOptions = {
     /** Runs `tail -F` for `logs --follow`. Injected in tests. */
     followLog?: ((logFile: string, lines: number) => Promise<number>) | undefined;
 };
+/** Merges the config's extra-app sources into its apps; a config without sources is returned as is. */
+export declare function LocalEdgeKit_resolveSupervisorConfig(config: LocalEdgeKit_SupervisorConfig): LocalEdgeKit_SupervisorConfig;
 /** Builds the backend-neutral exposure manifest from supervisor apps. */
 export declare function LocalEdgeKit_buildExposureManifest(config: LocalEdgeKit_SupervisorConfig): LocalEdgeCore_ExposureManifest;
 /** Renders rows as a padded text table. */

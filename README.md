@@ -125,6 +125,19 @@ before it replaces the real one, then a running nginx (adopted by its pid file) 
 mapping in front of it (`exposed`, `missing` or `conflict`). The Serve mapping itself is never
 changed by the supervisor.
 
+Per-machine extra apps (`@gg-utils/local-edge-kit/extra-apps`) add route-only apps that are not
+part of the project config. `extraApps` takes a list of sources; each has a `name` and a `load()`.
+`LocalEdgeKit_createExtraAppsFileSource({ filePath, root? })` reads a JSON file with the careful
+rules: it must stay inside `root` after `realpath`, must not be a symlink, and is opened with
+`O_NOFOLLOW`. A missing file means no extra apps. The file holds
+`{ "apps": [{ "id", "host", "upstream": "127.0.0.1:<port>", "upstreamHost"?, "buffering"?,
+"readTimeout"?, "locations"?: [{ "path", "upstream", "upstreamPath"?, "upstreamHost"?,
+"buffering"?, "readTimeout"? }] }] }`. Every extra app is `external`. A location without
+`upstreamPath` passes the request URI through. The apps merge with the project's before every
+command, and a duplicate id or hostname across sources is refused with an error that names the
+host and both sources. Host labels and wildcards are checked by the router's usual rules.
+`status` adds a `SOURCE` column (`project` for apps from the config).
+
 ## CLI
 
 The package exposes a `local-edge-kit` bin for script adapters that can execute TypeScript source

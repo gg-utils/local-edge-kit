@@ -50,14 +50,19 @@ export type LocalEdgeKit_SupervisedApp = {
     edgePort?: number | undefined;
     /** Host label for name-based backends. Defaults to `id`. */
     edgeName?: string | undefined;
-    /** Extra path routes for name-based backends (`path` -> `127.0.0.1:<localPort><upstreamPath>`). */
-    locations?: readonly {
-        path: string;
-        localPort: number;
-        upstreamPath?: string | undefined;
-    }[] | undefined;
+    /**
+     * Extra path routes for name-based backends (`path` -> `127.0.0.1:<localPort><upstreamPath>`),
+     * each with optional proxy overrides.
+     */
+    locations?: readonly LocalEdgeKit_SupervisedAppLocation[] | undefined;
     /** Hostname pattern for this app only (name-based backends), for a host under another label. */
     hostnameTemplate?: string | undefined;
+    /** Exact host for name-based backends; wins over every pattern. */
+    host?: string | undefined;
+    /** Proxy overrides for the `/` location (name-based backends). */
+    proxy?: LocalEdgeKit_SupervisedAppProxy | undefined;
+    /** Where the app was declared, shown by `status`. Default `project`. */
+    source?: string | undefined;
     /** HTTP path that must answer 2xx/3xx for the app to count as healthy. */
     healthPath: string;
     /** Optional second HTTP path that must answer before the app counts as ready. */
@@ -71,6 +76,21 @@ export type LocalEdgeKit_SupervisedApp = {
     dependsOn?: readonly string[] | undefined;
     startTimeoutMs?: number | undefined;
     stopTimeoutMs?: number | undefined;
+};
+/** Proxy overrides for one routed location. */
+export type LocalEdgeKit_SupervisedAppProxy = {
+    /** `Host` header sent upstream instead of the client's. */
+    upstreamHost?: string | undefined;
+    /** `false` turns response buffering off. */
+    buffering?: boolean | undefined;
+    /** nginx `proxy_read_timeout`, for example `3600s`. */
+    readTimeout?: string | undefined;
+};
+/** One extra path route of an app. An empty `upstreamPath` passes the request URI through. */
+export type LocalEdgeKit_SupervisedAppLocation = LocalEdgeKit_SupervisedAppProxy & {
+    path: string;
+    localPort: number;
+    upstreamPath?: string | undefined;
 };
 /** Observed process state of one app. */
 export type LocalEdgeKit_SupervisedAppState = "running" | "starting" | "port-busy" | "stale-pid" | "stopped" | "disabled" | "external";
