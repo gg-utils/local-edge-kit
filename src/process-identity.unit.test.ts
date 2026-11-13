@@ -10,6 +10,9 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -100,5 +103,33 @@ void test("reads a child's launch id from its environment where the platform all
     }
   } finally {
     child.kill("SIGKILL");
+  }
+});
+
+void test("readLaunchId false reads uid, start time and command line from one ps call and never asks for the environment", { skip: process.platform === "win32" }, () => {
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "kit-ps-shim-")));
+  const log = path.join(dir, "calls.log");
+  const shim = path.join(dir, "ps");
+  writeFileSync(shim, `#!/bin/sh\necho "$@" >> "${log}"\necho "  501 Thu Nov 12 03:47:37 2026     lane --serve"\n`);
+  chmodSync(shim, 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${dir}${path.delimiter}${oldPath ?? ""}`;
+  try {
+    assert.deepEqual(LocalEdgeKit_readProcessIdentity(4242, { readLaunchId: false }), { uid: 501, startedAt: "Thu Nov 12 03:47:37 2026", command: "lane --serve" });
+    const calls = readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(calls.length, 1, calls.join(" | "));
+    assert.ok(!calls.some((call) => /(^| )-E( |$)/u.test(call)), `no environment listing expected: ${calls.join(" | ")}`);
+    if (process.platform !== "linux") {
+      // Control: the default read does ask `ps -E` for the launch id, so the check above can fail.
+      LocalEdgeKit_readProcessIdentity(4242);
+      assert.ok(readFileSync(log, "utf8").split("\n").some((call) => /(^| )-E( |$)/u.test(call)));
+    }
+  } finally {
+    if (oldPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = oldPath;
+    }
+    rmSync(dir, { recursive: true, force: true });
   }
 });

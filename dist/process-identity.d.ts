@@ -18,7 +18,11 @@
  * a process that exits while a stop is in progress cannot pass its pid on to a new process that
  * then receives the next signal. A narrow window remains between that last check and the
  * `kill` system call itself; POSIX offers no pid handle to close it from Node.
- * Uid, start time and command line come from one `ps` call; the environment is read after it.
+ * Uid, start time and command line come from one `ps` call; the environment is read after it,
+ * and only when the caller asks for the launch id (`readLaunchId`, the default). A pid the
+ * supervisor did not start (an observed external pid) is read with `readLaunchId: false`: its
+ * identity is uid, start time and command line, with no launch id, and its environment is not
+ * opened or listed at all.
  * A process that still carries the recorded launch id when its environment is read was the
  * process at that pid since its start, so the fields read just before belong to it too.
  * Flow: start (with launch id) -> read identity (ps) -> store with pid -> later: read again ->
@@ -97,16 +101,20 @@ export declare function LocalEdgeKit_launchIdFromEnvironment(text: string): stri
 export declare function LocalEdgeKit_parsePsIdentityLine(line: string): LocalEdgeKit_ProcessIdentity | null;
 /**
  * Reads a live process's identity: uid, start time and command line from one `ps` call, then
- * the launch id from its environment.
+ * (unless `readLaunchId` is false) the launch id from its environment.
  *
  * @param pid - Process id.
+ * @param options - `readLaunchId` (default true). With false the process environment is not
+ * read (no `ps -E`, no `/proc/<pid>/environ`) and the identity has no `launchId`.
  * @returns The identity, or null when the process does not exist or `ps` cannot read it.
  * @example
  * ```typescript
  * LocalEdgeKit_readProcessIdentity(process.pid); // { uid: 501, startedAt: "Thu Nov 12 03:47:37 2026", command: "node ..." }
  * ```
  */
-export declare function LocalEdgeKit_readProcessIdentity(pid: number): LocalEdgeKit_ProcessIdentity | null;
+export declare function LocalEdgeKit_readProcessIdentity(pid: number, options?: {
+    readLaunchId?: boolean | undefined;
+}): LocalEdgeKit_ProcessIdentity | null;
 /**
  * Compares a recorded identity with the live one.
  *

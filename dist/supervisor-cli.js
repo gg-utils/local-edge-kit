@@ -10,7 +10,7 @@
  * @testing Node test runner (tsx): npm run test -- src/supervisor-cli.unit.test.ts
  *
  * @see src/supervisor.ts - Process inspection, start, stop and health.
- * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
+ * @documentation reviewed=2026-11-13 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { spawn } from "node:child_process";
 import { LOCAL_EDGE_CORE_DEFAULT_EXPOSURE_BACKEND, LOCAL_EDGE_CORE_HOSTNAMES_BACKEND, LocalEdgeCore_createExposureBackend, LocalEdgeCore_observeHostnamesServeTcp, LocalEdgeCore_resolveExposureBackendName, LocalEdgeCore_renderExposurePlanText, } from "@gg-utils/local-edge-core/exposure";
@@ -18,7 +18,9 @@ import { LocalEdgeKit_mergeExtraApps } from "./extra-apps.js";
 import { LocalEdgeKit_messageWord } from "./safe-message.js";
 import { LocalEdgeKit_tailRuntimeLaunchLogToStderr } from "./runtime-launch.js";
 import { LOCAL_EDGE_KIT_ROUTER_ID, LocalEdgeKit_inspectRouter, LocalEdgeKit_routerDown, LocalEdgeKit_routerUp, } from "./supervisor-router.js";
-import { LocalEdgeKit_createSupervisorHost, LocalEdgeKit_inspectSupervisedApp, LocalEdgeKit_probeSupervisedAppHealth, LocalEdgeKit_resolveAppPath, LocalEdgeKit_supervisorDown, LocalEdgeKit_supervisorUp, LocalEdgeKit_validateSupervisedApps, } from "./supervisor.js";
+import { LocalEdgeKit_createSupervisorHost, LocalEdgeKit_inspectSupervisedApp, LocalEdgeKit_probeSupervisedAppHealth, LocalEdgeKit_resolveAppKind, LocalEdgeKit_resolveAppPath, LocalEdgeKit_supervisedAppStatusFields, LocalEdgeKit_supervisorDown, LocalEdgeKit_supervisorUp, LocalEdgeKit_validateSupervisedApps, } from "./supervisor.js";
+/** Largest external log file `logs` reads: 8 MiB. */
+const LOCAL_EDGE_KIT_EXTERNAL_LOG_MAX_BYTES = 8 * 1024 * 1024;
 function LocalEdgeKit_parseSupervisorArgs(args) {
     const positionals = [];
     const flags = new Map();
@@ -66,7 +68,7 @@ export function LocalEdgeKit_resolveSupervisorConfig(config) {
     };
 }
 /**
- * Builds the backend-neutral exposure manifest from supervisor apps.
+ * Builds the backend-neutral exposure manifest from supervisor apps. `check` entries (no port) are left out.
  *
  * @param config - Supervisor config.
  * @returns The manifest the core exposure backends plan from.
@@ -81,17 +83,22 @@ export function LocalEdgeKit_buildExposureManifest(config) {
         hostname: config.exposure.hostname,
         rootZone: config.exposure.rootZone,
         hostnames: config.exposure.hostnames,
-        apps: config.apps.map((app) => ({
-            id: app.id,
-            enabled: app.enabled,
-            localPort: app.localPort,
-            edgePort: app.edgePort,
-            edgeName: app.edgeName,
-            locations: app.locations,
-            hostnameTemplate: app.hostnameTemplate,
-            host: app.host,
-            proxy: app.proxy,
-        })),
+        // A `check` entry has no port, so it is never routed or exposed.
+        apps: config.apps.flatMap((app) => app.kind === "check" || app.localPort === undefined
+            ? []
+            : [
+                {
+                    id: app.id,
+                    enabled: app.enabled,
+                    localPort: app.localPort,
+                    edgePort: app.edgePort,
+                    edgeName: app.edgeName,
+                    locations: app.locations,
+                    hostnameTemplate: app.hostnameTemplate,
+                    host: app.host,
+                    proxy: app.proxy,
+                },
+            ]),
     };
 }
 /**
@@ -115,18 +122,28 @@ function LocalEdgeKit_supervisorUsage(config) {
     return [
         `Usage: ${name} <command> [args]`,
         "",
-        "  status [--json] [--backend=<name>]   process, health and edge state per app",
+        "  status [--json] [--backend=<name>]   kind, process, health and edge state per app; --json adds",
+        "                                       command line, cwd, env file and the other fields",
         "  up [app...|router]                   start apps (and dependencies), adopting running ones;",
         "                                       with the hostnames backend also write the router config",
         "                                       and start or reload nginx",
         "  down [app...|router]                 stop apps (process group, TERM then KILL) and the router",
         "  health [app...] [--json]             probe health paths on 127.0.0.1",
-        "  logs <app> [-n N] [-f]               tail an app log",
+        "  logs <app> [-n N] [-f]               tail an app log (an external app's log is read, not followed)",
         "  plan [--backend=ports|hostnames|<name>] [--remove] [--json]   show exposure actions (never changes anything)",
         "  expose [--backend=<name>] [--apply]  map edge URLs; dry run without --apply",
         "  unexpose [--backend=<name>] [--apply] remove edge URLs this config owns; dry run without --apply",
         "",
     ].join("\n");
+}
+function LocalEdgeKit_healthCell(row, view) {
+    if (row.inspection.state === "check") {
+        return "not run";
+    }
+    if (row.health === null) {
+        return view === "table" ? "-" : null;
+    }
+    return row.health.healthy ? "ok" : "fail";
 }
 function LocalEdgeKit_selectIds(config, positionals) {
     if (positionals.length > 0) {
@@ -191,7 +208,8 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                 const rows = await Promise.all(config.apps.map(async (app) => {
                     const inspection = LocalEdgeKit_inspectSupervisedApp(app, host);
                     const health = inspection.state === "running" ? await LocalEdgeKit_probeSupervisedAppHealth(app, host) : null;
-                    return { app, inspection, health, edge: edge.get(app.id) ?? null };
+                    const fields = LocalEdgeKit_supervisedAppStatusFields(app, inspection, host);
+                    return { app, inspection, health, fields, edge: edge.get(app.id) ?? null };
                 }));
                 const router = usesRouter && manifest.hostnames && config.exposure.router
                     ? {
@@ -208,27 +226,40 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                         apps: rows.map((row) => ({
                             id: row.app.id,
                             enabled: row.app.enabled,
+                            kind: row.fields.kind,
                             state: row.inspection.state,
                             pid: row.inspection.pid,
-                            localPort: row.app.localPort,
+                            processGroup: row.fields.processGroup,
+                            localPort: row.app.localPort ?? null,
                             healthy: row.health?.healthy ?? null,
                             health: row.health?.checks ?? [],
+                            healthStatus: LocalEdgeKit_healthCell(row, "json"),
                             note: row.inspection.note,
                             source: row.app.source ?? "project",
+                            commandLine: row.fields.commandLine,
+                            cwd: row.fields.cwd,
+                            envFile: row.fields.envFile,
+                            envFilePresent: row.fields.envFilePresent,
+                            since: row.fields.since,
+                            restarts: row.fields.restarts,
                             edge: row.edge,
                         })),
                     }, null, 2)}\n`);
                 }
                 else {
                     stdout.write(`exposure backend: ${backend.name}\n`);
-                    stdout.write(LocalEdgeKit_renderTable(["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "SOURCE", "NOTE"], rows.map((row) => [
+                    stdout.write(LocalEdgeKit_renderTable(["APP", "STATE", "PID", "LOCAL", "HEALTH", "EDGE", "EDGE-STATE", "KIND", "PGID", "SINCE", "RESTARTS", "SOURCE", "NOTE"], rows.map((row) => [
                         row.app.id,
                         row.inspection.state,
                         row.inspection.pid === null ? "-" : String(row.inspection.pid),
-                        `127.0.0.1:${String(row.app.localPort)}`,
-                        row.health === null ? "-" : row.health.healthy ? "ok" : "fail",
+                        row.app.localPort === undefined ? "-" : `127.0.0.1:${String(row.app.localPort)}`,
+                        LocalEdgeKit_healthCell(row, "table"),
                         row.edge?.edgeUrl ?? "-",
                         row.edge?.state ?? "-",
+                        row.fields.kind,
+                        row.fields.processGroup === null ? "-" : String(row.fields.processGroup),
+                        row.fields.since ?? "-",
+                        String(row.fields.restarts),
                         row.app.source ?? "project",
                         row.inspection.note,
                     ]).concat(router === null
@@ -242,6 +273,10 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                                 "-",
                                 `serve :${String(router.edgePort)}`,
                                 router.serve.state,
+                                "router",
+                                "-",
+                                "-",
+                                "-",
                                 "-",
                                 `${router.inspection.note}; ${router.serve.note}`,
                             ],
@@ -253,18 +288,21 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
             case "health": {
                 const ids = LocalEdgeKit_selectIds(config, appPositionals);
                 const apps = config.apps.filter((app) => ids.includes(app.id));
-                const results = await Promise.all(apps.map((app) => LocalEdgeKit_probeSupervisedAppHealth(app, host)));
+                // A `check` entry has no port to probe; it is listed as not run and never fails the command.
+                const results = await Promise.all(apps.map(async (app) => LocalEdgeKit_resolveAppKind(app) === "check"
+                    ? { appId: app.id, healthy: null, checks: [], status: "not run" }
+                    : await LocalEdgeKit_probeSupervisedAppHealth(app, host)));
                 if (json) {
                     stdout.write(`${JSON.stringify(results, null, 2)}\n`);
                 }
                 else {
                     stdout.write(LocalEdgeKit_renderTable(["APP", "HEALTH", "CHECKS"], results.map((result) => [
                         result.appId,
-                        result.healthy ? "ok" : "fail",
+                        result.healthy === null ? "not run" : result.healthy ? "ok" : "fail",
                         result.checks.map((check) => `${check.path}=${String(check.status ?? "no answer")}`).join(" "),
                     ])));
                 }
-                return results.every((result) => result.healthy) ? 0 : 1;
+                return results.every((result) => result.healthy !== false) ? 0 : 1;
             }
             case "up":
             case "down": {
@@ -299,6 +337,22 @@ export async function LocalEdgeKit_runSupervisorCli(options) {
                 }
                 const linesFlag = parsed.flags.get("lines");
                 const lines = typeof linesFlag === "string" && /^\d+$/.test(linesFlag) ? Number(linesFlag) : 100;
+                if (LocalEdgeKit_resolveAppKind(app) === "external") {
+                    // An external log may live anywhere; it is only read, through the safe-read helper.
+                    if (parsed.flags.has("follow")) {
+                        stderr.write(`${app.id} is external: its log is read, not followed\n`);
+                        return 2;
+                    }
+                    const text = host.readExternalText(app.logFile, { maxBytes: LOCAL_EDGE_KIT_EXTERNAL_LOG_MAX_BYTES });
+                    if (text === null) {
+                        stderr.write(`${app.id}: log file not found\n`);
+                        return 1;
+                    }
+                    const all = text.split("\n");
+                    const kept = (all[all.length - 1] === "" ? all.slice(0, -1) : all);
+                    stdout.write(lines === 0 || kept.length === 0 ? "" : `${kept.slice(-lines).join("\n")}\n`);
+                    return 0;
+                }
                 const logFile = LocalEdgeKit_resolveAppPath(app, app.logFile);
                 if (parsed.flags.has("follow")) {
                     const follow = options.followLog ??

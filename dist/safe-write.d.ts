@@ -25,7 +25,8 @@
  * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, a
  * non-blocking `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are
  * read, then refuse a file or folder that group or others can write or that another user owns,
- * and a file over the size limit.
+ * and a file over the size limit. With `refuseSymlinkedParents` the path of the root and every
+ * folder above it are walked too, and a symlink anywhere in it is refused.
  *
  * @example
  * ```typescript
@@ -51,8 +52,14 @@ export type LocalEdgeKit_SafeWriteHooks = {
 export declare const LOCAL_EDGE_KIT_SAFE_READ_MAX_BYTES: number;
 /** Options for `LocalEdgeKit_readFileSafe`. */
 export type LocalEdgeKit_SafeReadOptions = {
-    /** Folder the file must stay inside. The root itself may be a symlink. */
+    /** Folder the file must stay inside. The root itself may be a symlink unless `refuseSymlinkedParents` is set. */
     root: string;
+    /**
+     * Refuse a symlink anywhere in the path of `root`, from the filesystem root down (the file's
+     * parent folder and every folder above it). Default false: the root and its ancestors are
+     * trusted and `root` is resolved with `realpath`. The supervisor sets it for external files.
+     */
+    refuseSymlinkedParents?: boolean | undefined;
     /** Largest file accepted, checked by `fstat` and again while reading. Default 256 KiB. */
     maxBytes?: number | undefined;
     /** Owner the file must have. Default: the current user. Test seam. */
@@ -88,12 +95,14 @@ export type LocalEdgeKit_SafeWriteOptions = {
  * read with the same bound. Error messages name the path and the rule, never file content.
  *
  * @param filePath - File to read; must be inside `options.root`.
- * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
+ * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB) and
+ * `refuseSymlinkedParents`.
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
  * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
  * (`outside-root`), is a symlink, also one swapped in just before the open (`symlink`), or not a
  * regular file (`not-file`), the root or a folder on the way is not a folder (`not-a-folder`) or
- * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the
+ * is a symlink (`symlink`; with `refuseSymlinkedParents` a symlink in the path of the root or
+ * above it is `symlinked-parent`), a folder or the file changed while it was opened (`changed`), the
  * file or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
  * (`unsafe-owner`), or the file is over the size limit (`too-large`). Any other operating-system
  * error (for example `EACCES`) passes through as it is; it names the path, never the content.

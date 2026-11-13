@@ -80,3 +80,30 @@ export function LocalEdgeKit_messageEnvNames(names: readonly string[]): string {
   const rest = names.length - shown.length;
   return rest > 0 ? `${shown.join(",")} (and ${String(rest)} more)` : shown.join(",");
 }
+
+/** Longest command line `LocalEdgeKit_boundedCommandLine` returns, in characters. */
+export const LOCAL_EDGE_KIT_COMMAND_LINE_MAX_CHARS = 200;
+
+/**
+ * Bounds an observed process command line for display: control characters (including newlines,
+ * tabs and escape bytes), bidirectional and other invisible format characters (Unicode category
+ * Cf: for example U+202A-U+202E, U+2066-U+2069, U+200B-U+200F, U+FEFF) and the line and paragraph
+ * separators U+2028 and U+2029 are removed, and the text is cut to 200 characters, the last of
+ * them `…` when something was cut. Unlike `LocalEdgeKit_messageWord` it keeps the words, because a
+ * status row exists to show the command; it is meant for status output, not for error messages.
+ * It only edits the command line text it is given; it reads no process environment.
+ *
+ * @param value - The command line as the process list printed it.
+ * @returns Text of at most 200 characters without control or format characters.
+ *
+ * @example
+ * ```typescript
+ * LocalEdgeKit_boundedCommandLine("node\u001b[0m server.js\n"); // "node[0m server.js"
+ * ```
+ */
+export function LocalEdgeKit_boundedCommandLine(value: string): string {
+  const plain = [...value.replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "")];
+  return plain.length > LOCAL_EDGE_KIT_COMMAND_LINE_MAX_CHARS
+    ? `${plain.slice(0, LOCAL_EDGE_KIT_COMMAND_LINE_MAX_CHARS - 1).join("")}…`
+    : plain.join("");
+}

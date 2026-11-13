@@ -377,7 +377,7 @@ void test("extra-app sources merge into the router config and status shows each 
 
   const status = capture();
   await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: machineConfig, host, stdout: status.writer, stderr: capture().writer });
-  assert.match(status.text(), /EDGE-STATE\s+SOURCE\s+NOTE/);
+  assert.match(status.text(), /EDGE-STATE\s+KIND\s+PGID\s+SINCE\s+RESTARTS\s+SOURCE\s+NOTE/);
   assert.match(status.text(), /play\s+external\s.*\smachine\.json\s+route only/);
   assert.match(status.text(), /preview\s+external\s.*\sproject\s+route only/);
 
