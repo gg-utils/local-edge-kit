@@ -172,7 +172,9 @@ function LocalEdgeKit_walkDirsForRead(realRoot, relativeDir) {
  * @returns Every folder from the filesystem root down to `root` with its device, inode, mode and
  * owner, or null when a folder on the way does not exist.
  * @throws Error `local-edge-kit-safe-read-symlinked-parent` for a symlink on the way and
- * `local-edge-kit-safe-read-not-a-folder` for a non-folder.
+ * `local-edge-kit-safe-read-not-a-folder` for a non-folder. Any other filesystem error from
+ * `lstat` (for example `EACCES` on a folder that cannot be searched) is rethrown as it came, not
+ * wrapped: only a missing folder (`ENOENT`) is the null result.
  */
 function LocalEdgeKit_walkAncestorsForRead(root) {
     const parsed = path.parse(root);

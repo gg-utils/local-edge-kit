@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.2 - 2026-11-13
+
+A fix for the health probe: the paths it requests stay on `127.0.0.1:<localPort>`.
+
+- **Fix:** `status`, `health` and the `up` readiness wait built the probe URL by joining
+  `http://127.0.0.1:<port>` and the configured path as text, and only `healthPath` had to start with
+  `/`. A `readyPath` such as `@host.example/x` made the probe request another host. Now:
+  - `healthPath` and a set `readyPath` are checked the same way by the config validation. The path
+    must start with a single `/` (no `//` prefix, so no scheme and no protocol-relative host) and
+    must not contain `@`, a backslash or a control character. A path without the leading `/` keeps
+    the message `<id>: healthPath must start with /` (and `readyPath` has the same one); any other bad
+    shape is the named error `local-edge-kit-probe-path-invalid`. Neither message repeats the value.
+    An empty `readyPath` still counts as not set. Query text (`/health?full=1`) stays allowed.
+  - The probe builds its URL with `new URL(path, "http://127.0.0.1:<port>")` and does not send the
+    request unless the result has the scheme `http:`, the host exactly `127.0.0.1`, the app's port
+    and no user-info. A refused path counts as failed (`status` null) and is shown without its text.
+    This also covers an extra-apps file `healthPath`.
+  - A project whose `readyPath` or `healthPath` has one of the refused shapes now fails the config
+    check with the message above; fix the path (it was never a valid path on loopback).
+- **Test:** `clientAddress`, `proxyProtocol`, `stream` and `nginx.errorLogLevel` set in the supervisor
+  config's `exposure.hostnames` are shown to reach the core render that `up router` writes (the stream
+  listener, the `proxy_protocol` HTTP listener and the `error_log` level are in the written config).
+- **Test:** a zero-padded day in the start time (`Sun Nov 01 00:00:00 2026`) is accepted by `since` on
+  purpose, and pinned; `ps` does not print it. Every other spacing stays refused.
+- **Docs:** the JSDoc of that start-time parser says so, `LocalEdgeKit_walkAncestorsForRead` names the
+  other filesystem errors it rethrows (such as `EACCES`), and the test helper for `since` has its
+  `@param`.
+
 ## 0.6.1 - 2026-11-13
 
 Fixes from the first consumer of 0.6.0, and the core pin moves to `v0.5.0`.

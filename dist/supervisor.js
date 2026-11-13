@@ -224,12 +224,59 @@ export function LocalEdgeKit_resolveAppKind(app) {
     return app.kind;
 }
 /**
+ * Whether a probe path is a plain path that can only mean a path on the loopback port: it starts
+ * with exactly one `/` (so no scheme and no `//` host form) and has no `@`, backslash or control
+ * character (the URL parser would read `@host` as a host and a backslash as `/`, and strips tabs
+ * and newlines). Query and fragment text is allowed.
+ *
+ * @param value - The configured `healthPath` or `readyPath`.
+ * @returns True when the path has that shape.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_isLoopbackProbePath("/healthz?full=1"); // true
+ * LocalEdgeKit_isLoopbackProbePath("@host.example/x"); // false
+ * ```
+ */
+export function LocalEdgeKit_isLoopbackProbePath(value) {
+    return value.startsWith("/") && !value.startsWith("//") && !/[@\\\p{Cc}]/u.test(value);
+}
+/**
+ * Builds the probe URL of one path on `127.0.0.1:<port>` with the URL parser and checks the
+ * result: the host must be exactly `127.0.0.1`, the port must be the app's port, the scheme must
+ * be `http:` and there must be no user-info. Never throws.
+ *
+ * @param port - The app's local port.
+ * @param probePath - The configured path.
+ * @returns The URL text, or null when the path would leave `127.0.0.1:<port>` or is not a URL.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_loopbackProbeUrl(3100, "/healthz"); // "http://127.0.0.1:3100/healthz"
+ * LocalEdgeKit_loopbackProbeUrl(3100, "@host.example/x"); // null
+ * ```
+ */
+export function LocalEdgeKit_loopbackProbeUrl(port, probePath) {
+    try {
+        const base = new URL(`http://127.0.0.1:${String(port)}`);
+        const url = new URL(probePath, base);
+        const same = url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port === base.port && url.username === "" && url.password === "";
+        return same ? url.href : null;
+    }
+    catch {
+        return null;
+    }
+}
+/** Named error line for a probe path that is not a plain loopback path; never repeats the value. */
+function LocalEdgeKit_probePathProblem(appId, field) {
+    return `local-edge-kit-probe-path-invalid: ${LocalEdgeKit_messageWord(appId)}: ${field} must be a plain path on loopback (one leading /, no // prefix, @, backslash, scheme or control character)`;
+}
+/**
  * Validates supervisor apps: unique ids, a known and consistent kind, required fields per kind,
  * unique local ports, known dependencies, enabled apps depending only on enabled apps, and no
  * cycles. `run` entries (enabled) need `cwd`, `command`, `pidFile` and `logFile`; `external`
  * entries may not set `command` and may name `pidFile` and `logFile` only as absolute paths;
  * `check` entries (enabled) need `cwd` and `command`, and are the only kind without a port or
- * health path.
+ * health path. `healthPath` and a set `readyPath` must be plain loopback paths
+ * (`LocalEdgeKit_isLoopbackProbePath`); the error never repeats the value.
  *
  * @param apps - All configured apps.
  * @returns One line per problem; an empty list means valid. Never throws.
@@ -260,6 +307,17 @@ export function LocalEdgeKit_validateSupervisedApps(apps) {
         if (kind !== "check") {
             if (app.healthPath === undefined || !app.healthPath.startsWith("/")) {
                 problems.push(`${app.id}: healthPath must start with /`);
+            }
+            else if (!LocalEdgeKit_isLoopbackProbePath(app.healthPath)) {
+                problems.push(LocalEdgeKit_probePathProblem(app.id, "healthPath"));
+            }
+            if (app.readyPath !== undefined && app.readyPath !== "") {
+                if (!app.readyPath.startsWith("/")) {
+                    problems.push(`${app.id}: readyPath must start with /`);
+                }
+                else if (!LocalEdgeKit_isLoopbackProbePath(app.readyPath)) {
+                    problems.push(LocalEdgeKit_probePathProblem(app.id, "readyPath"));
+                }
             }
             if (app.localPort === undefined) {
                 problems.push(`${app.id}: ${kind} apps need localPort`);
@@ -541,7 +599,8 @@ const LOCAL_EDGE_KIT_PS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul
 /**
  * Converts a start time as `ps -o lstart=` prints it in the C locale (`Thu Nov 12 03:47:37 2026`,
  * local time) to an ISO UTC time. A single-digit day is accepted as `ps` pads it (`Fri Nov  6 08:01:02 2026`,
- * two spaces) or with one space. Strict otherwise: anything that is not exactly that shape, or not a real
+ * two spaces), with one space, or zero-padded (`Sun Nov 01 00:00:00 2026`: `ps` never prints it, but it
+ * is an unambiguous day and is accepted on purpose). Strict otherwise: anything that is not exactly that shape, or not a real
  * date, gives null (a lenient parser would read `start-701` as the year 701).
  *
  * @param startedAt - The start time as the process list printed it.
@@ -586,7 +645,9 @@ export function LocalEdgeKit_supervisedAppStatusFields(app, inspection, host) {
     };
 }
 /**
- * Probes an app's health path (and ready path, when set) on `127.0.0.1`.
+ * Probes an app's health path (and ready path, when set) on `127.0.0.1`. The URL is built with the
+ * URL parser and refused unless its host is exactly `127.0.0.1` and its port is the app's port; a
+ * refused path is not fetched and counts as failed (`status` null, `path` shown without its value).
  *
  * @param app - The app.
  * @param host - Supervisor host (HTTP through `host.httpStatus`).
@@ -605,7 +666,12 @@ export async function LocalEdgeKit_probeSupervisedAppHealth(app, host, timeoutMs
     const port = app.localPort;
     const paths = [app.healthPath, ...(app.readyPath ? [app.readyPath] : [])];
     const checks = await Promise.all(paths.map(async (probePath) => {
-        const status = await host.httpStatus(`http://127.0.0.1:${String(port)}${probePath}`, timeoutMs);
+        const url = LocalEdgeKit_loopbackProbeUrl(port, probePath);
+        if (url === null) {
+            // Refused, not fetched: the path would leave 127.0.0.1:<port>. The value is not repeated.
+            return { path: LocalEdgeKit_messageWord(probePath), status: null, ok: false };
+        }
+        const status = await host.httpStatus(url, timeoutMs);
         return { path: probePath, status, ok: LocalEdgeCore_isHealthyHttpStatusCode(status) };
     }));
     return { appId: app.id, healthy: checks.every((check) => check.ok), checks };

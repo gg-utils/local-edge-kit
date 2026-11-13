@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.2
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.2"
   }
 }
 ```
@@ -95,7 +95,9 @@ process.exitCode = await LocalEdgeKit_runSupervisorCli({ args: process.argv.slic
 
 Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs, a loopback port,
 an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
-and `dependsOn`. `launchEnv` (values, or a function called only when the app is started) is set
+and `dependsOn`. `healthPath` and `readyPath` are plain paths on `127.0.0.1:<localPort>`: one leading `/`,
+no `//` prefix, `@`, backslash or control character (a bad one fails the config check, and the probe
+never requests another host). `launchEnv` (values, or a function called only when the app is started) is set
 over the supervisor's env for that process; it counts toward the required names and only its
 names are printed. `kind: "external"` (the older `external: true` still works) marks a route-only app: it is listed, probed and routed, but
 never started, stopped or signalled. See [Catalog kinds and status fields](#catalog-kinds-and-status-fields). `locations` adds extra path routes for the hostnames backend.
@@ -262,7 +264,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.2 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -304,7 +306,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.2"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:
