@@ -1087,6 +1087,12 @@ function LocalEdgeKit_stopLocked(app, host, out) {
         timeoutMs: app.stopTimeoutMs ?? LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS,
         out,
     });
+    /**
+     * Whether the recorded pid is still the process this pid file named.
+     * @returns True while the same uid, start time and command are listed for the pid.
+     * @example
+     * const stillOurs = isOurs();
+     */
     const isOurs = () => LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
     // A leader that has just exited can stay listed for a moment; look again, bounded, before calling it a survivor.
     const settleDeadline = host.now() + LOCAL_EDGE_KIT_SUPERVISOR_EXIT_SETTLE_MS;
