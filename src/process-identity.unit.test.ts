@@ -86,6 +86,17 @@ void test("parses the launch id from environ and ps -E listings, and one ps iden
   assert.equal(LocalEdgeKit_parsePsIdentityLine("garbage"), null);
 });
 
+void test("a zombie ps line is gone, a live state keeps the identity, and the stat column is optional", () => {
+  const rest = "Thu Nov  5 03:47:37 2026     pnpm dev --port 1";
+  const live = { uid: 501, startedAt: "Thu Nov 5 03:47:37 2026", command: "pnpm dev --port 1" };
+  assert.equal(LocalEdgeKit_parsePsIdentityLine(`  501 Z    ${rest}`), null);
+  assert.equal(LocalEdgeKit_parsePsIdentityLine(`  501 Z+   ${rest}`), null);
+  assert.equal(LocalEdgeKit_parsePsIdentityLine(`  501 Zs   ${rest}`), null);
+  assert.deepEqual(LocalEdgeKit_parsePsIdentityLine(`  501 Ss   ${rest}`), live);
+  assert.deepEqual(LocalEdgeKit_parsePsIdentityLine(`  501 S+   ${rest}`), live);
+  assert.deepEqual(LocalEdgeKit_parsePsIdentityLine(`  501 ${rest}`), live);
+});
+
 void test("reads a child's launch id from its environment where the platform allows it", async () => {
   const launchId = LocalEdgeKit_newLaunchId();
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], {
