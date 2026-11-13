@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0"
   }
 }
 ```
@@ -97,16 +97,16 @@ Each app gives `cwd`, `command`, `args`, an env file and the env NAMES it needs,
 an optional edge port, `healthPath`, optional `readyPath` and `readyLogLine`, pid and log files,
 and `dependsOn`. `launchEnv` (values, or a function called only when the app is started) is set
 over the supervisor's env for that process; it counts toward the required names and only its
-names are printed. `external: true` marks a route-only app: it is listed, probed and routed, but
-never started, stopped or signalled. `locations` adds extra path routes for the hostnames backend.
+names are printed. `kind: "external"` (the older `external: true` still works) marks a route-only app: it is listed, probed and routed, but
+never started, stopped or signalled. See [Catalog kinds and status fields](#catalog-kinds-and-status-fields). `locations` adds extra path routes for the hostnames backend.
 
 | Command | What it does |
 |---|---|
-| `status [--json]` | Process state, health and edge state per app. |
+| `status [--json]` | Kind, process state, health and edge state per app. `--json` adds the command line, working directory and env file. |
 | `up [app...]` | Starts apps in dependency order and waits for health. Adopts a running app. |
 | `down [app...]` | Stops dependants first: SIGTERM to the process group, SIGKILL after the timeout. |
 | `health [app...]` | Probes the health and ready paths on `127.0.0.1`. |
-| `logs <app> [-n N] [-f]` | Tails the app log. |
+| `logs <app> [-n N] [-f]` | Tails the app log. For an `external` app it prints the last lines of its read-only log file; `-f` is refused. |
 | `plan [--backend=<name>] [--remove]` | Prints exposure actions and changes nothing. |
 | `expose` / `unexpose [--apply]` | Maps or removes edge URLs. Without `--apply` this is a dry run. |
 
@@ -158,7 +158,7 @@ publish the pid file, so two supervisors cannot start the same app twice. A lock
 only complete (temp file, then `link`). A lock left by a process that is gone is taken over
 under a guard that removes only that exact stale lock, so a successor's lock is never removed.
 An empty or partial lock (an older version may still be writing it) is never removed
-automatically: remove it by hand once no supervisor runs. Pid, lock and log files must sit inside the app's `cwd`.
+automatically: remove it by hand once no supervisor runs. Pid, lock and log files of a `run` app must sit inside the app's `cwd`.
 They are written without following symlinks: folders are walked one level at a time and checked
 again after the open and before the rename, pid files are replaced atomically, and new files are
 `0600` and new folders `0700`. The `cwd` and its ancestors are trusted; folders below it must
@@ -191,13 +191,63 @@ JSON syntax error reports only the line and column, never file text. Host labels
 checked by the router's usual rules.
 `status` adds a `SOURCE` column (`project` for apps from the config).
 
+## Catalog kinds and status fields
+
+Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run")`.
+
+| Kind | What it is | Needs |
+|---|---|---|
+| `run` | The supervisor starts, adopts and stops it. | `cwd`, `command`, `pidFile`, `logFile`, `localPort`, `healthPath` |
+| `external` | Route only. Never started, stopped or signalled. | `localPort`, `healthPath`; no `command` |
+| `check` | A command run from a `cwd`, with no port. | `cwd`, `command`; no `localPort` or `healthPath` |
+
+- **`kind` and `external`.** `external: true` is still accepted and means `kind: "external"`;
+  it is replaced by `kind`. Setting `kind` together with a conflicting `external` (a `kind` other
+  than `external` with `external: true`, or `kind: "external"` with `external: false`) is refused
+  with the named error `local-edge-kit-kind-conflict`; a `kind` that is not `run`, `external` or
+  `check` is `local-edge-kit-kind-unknown`. `LocalEdgeKit_validateSupervisedApps` reports both,
+  and `LocalEdgeKit_resolveAppKind` throws them. `localPort` is optional for `check` entries only.
+  The extra-apps file source keeps producing `external` entries, shown as `kind: "external"`.
+- **`check` entries in this release.** `up` and `down` skip them, and `status` lists them with
+  state `check` and health `not run` (`"healthStatus": "not run"` in `--json`; `health` lists them
+  as `not run` and does not fail on them). They have no port, so they are never routed or exposed.
+  Running them on demand comes in a later release.
+- **External pid and log files, read only.** An `external` entry may name `pidFile` and `logFile`
+  anywhere, as absolute paths (a relative path is a config error). They are only read, through
+  `LocalEdgeKit_readFileSafe` (`readExternalText` on the supervisor host): no symlinks, owned by you
+  and not writable by group or others, in a folder with the same rules, at most 256 KiB for a pid
+  file and 8 MiB for a log. Nothing is written to them and the pid in a pid file is never signalled
+  (`up` and `down` skip external entries). A file the safe read refuses (for example a pid file in
+  a world-writable folder such as `/tmp`) leaves the pid empty, and the note names the refusal
+  code, never the path or the content. `run` entries keep the inside-`cwd` rule, and their pid
+  files are never read through this path.
+- **Observed pid.** When an external entry has a readable `pidFile` naming a live process, `status`
+  shows that pid, its process group, command line and start time as observed. The process was not
+  started by the supervisor and its identity is not verified; the pid is information only.
+- **Status fields.** Every row, whatever the kind, has:
+
+| Field | Meaning |
+|---|---|
+| `kind` | The resolved kind. |
+| `processGroup` | Process group of the observed pid, or `null`. |
+| `commandLine` | Command line of the observed pid as the process list prints it, control characters removed and cut to 200 characters (the last `…` when cut); `null` when no process is observed. The environment is never read. Keep secrets out of argv. |
+| `cwd` | The working directory as configured, or `null`. |
+| `envFile`, `envFilePresent` | The env file path as configured (never its content) and whether it exists. The file is not opened. |
+| `since` | ISO time the observed process started, from the process list's start time (to the second); `null` when unknown. |
+| `restarts` | Restarts counted by the runner. Always `0` in this release; the runner sets it later. |
+
+  The human table shows the short fields (`KIND`, `PGID`, `SINCE`, `RESTARTS`, after `EDGE-STATE`)
+  and keeps the long ones out; `status --json` carries all of them (there is no `--wide` view).
+  JSON rows also have `healthStatus` (`ok`, `fail`, `not run` or `null` when not probed) and
+  `localPort` is `null` for a `check` entry.
+
 ## CLI
 
 The package exposes a `local-edge-kit` bin for script adapters that can execute TypeScript source
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -239,7 +289,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.5.1"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:

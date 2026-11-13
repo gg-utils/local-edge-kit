@@ -42,6 +42,8 @@ export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   processes: Map<number, FakeProcess & { alive: boolean }>;
   /** Every lock file creation attempt, in order. */
   lockAttempts: string[];
+  /** Every path read through `readExternalText`, in order. */
+  externalReads: string[];
 };
 
 /** In-memory host. Processes are pids with a group, alive flag and optional listening port. */
@@ -60,6 +62,13 @@ export function fakeHost(seed: {
   shared?: { files: Map<string, string>; processes: Map<number, FakeProcess & { alive: boolean }> };
   /** Canonical paths the fake `realPath` returns; any other path is returned unchanged. */
   realPaths?: Record<string, string>;
+  /** Paths the fake `realPath` reports as missing (null). */
+  absentPaths?: readonly string[];
+  /**
+   * Answers `readExternalText` (the safe read of an external entry's pid or log file). Default:
+   * the text in `files`, or null. A thrown error models a refusal such as `unsafe-mode`.
+   */
+  readExternal?: (filePath: string) => string | null;
   /** Answers `fetchUnixSocketText`; default null (no answer). */
   fetchUnixSocket?: (socketPath: string, urlPath: string) => string | null;
   /** This supervisor's own pid. Default 1000. */
@@ -76,6 +85,7 @@ export function fakeHost(seed: {
   let clock = 0;
   let nextPid = 9000;
   const lockAttempts: string[] = [];
+  const externalReads: string[] = [];
   const host: FakeSupervisorHost = {
     signals,
     spawned,
@@ -84,10 +94,15 @@ export function fakeHost(seed: {
     files,
     processes,
     lockAttempts,
+    externalReads,
     readText: (filePath) => {
       const text = files.get(filePath) ?? null;
       seed.onRead?.(filePath, text);
       return text;
+    },
+    readExternalText: (filePath) => {
+      externalReads.push(filePath);
+      return seed.readExternal ? seed.readExternal(filePath) : (files.get(filePath) ?? null);
     },
     writeText: (filePath, text) => void files.set(filePath, text),
     ensureDir: (dirPath) => void dirs.push(dirPath),
@@ -103,7 +118,7 @@ export function fakeHost(seed: {
       files.set(filePath, text);
       return true;
     },
-    realPath: (filePath) => seed.realPaths?.[filePath] ?? filePath,
+    realPath: (filePath) => (seed.absentPaths?.includes(filePath) === true ? null : (seed.realPaths?.[filePath] ?? filePath)),
     fetchUnixSocketText: (socketPath, urlPath) => seed.fetchUnixSocket?.(socketPath, urlPath) ?? null,
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,

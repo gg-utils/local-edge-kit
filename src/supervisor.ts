@@ -19,12 +19,18 @@
  * lock (see `LocalEdgeKit_acquireSupervisorLock`); a live owner makes the other supervisor fail
  * with a clear message.
  *
- * Files: pid and lock files are written inside the app's `cwd` through `safe-write.ts`
- * (no symlinks followed, atomic replace, 0600 files, 0700 folders); the log is opened for
- * append the same way. A pid or log path outside `cwd` is refused.
+ * Kinds: every entry has a resolved kind, `kind ?? (external ? "external" : "run")`. `run` entries
+ * are started, adopted and stopped as described above. `external` entries are route only: never
+ * started, stopped or signalled; they may name an absolute `pidFile` and `logFile` anywhere, which
+ * are only read (through `LocalEdgeKit_readFileSafe`) and never written or signalled. `check`
+ * entries (a `cwd` and a command, no port) are listed in status and skipped by `up` and `down` in
+ * this release.
+ *
+ * Files: pid and lock files of `run` entries are written inside the app's `cwd` through
+ * `safe-write.ts` (no symlinks followed, atomic replace, 0600 files, 0700 folders); the log is
+ * opened for append the same way. A pid or log path of a `run` entry outside `cwd` is refused.
  * Env checks read names only: values are never returned or printed. Launch env values go to the
- * started process only; output lists their names. External apps are route only: never started,
- * stopped or signalled.
+ * started process only; output lists their names.
  * Flow: config -> validate + dependency order -> lock -> inspect (pid file + identity + port)
  * -> start/stop -> publish pid file -> unlock -> health.
  *
@@ -32,7 +38,7 @@
  *
  * @see src/supervisor-cli.ts - Command dispatcher that wires this module to an exposure backend.
  * @see src/runtime-launch.ts - Log tail helper reused for `logs`.
- * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
+ * @documentation reviewed=2026-11-13 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -55,12 +61,24 @@ import {
   LocalEdgeKit_readProcessIdentity,
   LocalEdgeKit_verifyProcessIdentity,
 } from "./process-identity.js";
+import { LocalEdgeKit_boundedCommandLine, LocalEdgeKit_messageWord } from "./safe-message.js";
 import {
   LocalEdgeKit_createFileExclusive,
   LocalEdgeKit_ensureSafeDir,
   LocalEdgeKit_openAppendSafe,
+  LocalEdgeKit_readFileSafe,
   LocalEdgeKit_writeFileAtomic,
 } from "./safe-write.js";
+
+/**
+ * What a catalog entry is.
+ * - `run`: the supervisor starts, adopts and stops it (needs `cwd`, `command`, `pidFile`, `logFile`
+ *   and `localPort`).
+ * - `external`: route only; its process is never started, stopped or signalled. It may name an
+ *   absolute `pidFile` and `logFile` that are only read.
+ * - `check`: a command run from a `cwd` that has no port. `up` and `down` skip it in this release.
+ */
+export type LocalEdgeKit_SupervisedAppKind = "run" | "external" | "check";
 
 /** One supervised app. Paths may be relative to `cwd`. */
 export type LocalEdgeKit_SupervisedApp = {
@@ -75,8 +93,15 @@ export type LocalEdgeKit_SupervisedApp = {
   command?: string | undefined;
   args?: readonly string[] | undefined;
   /**
+   * What this entry is: `run`, `external` or `check`. When absent it is `external` if the older
+   * `external` flag is true and `run` otherwise. Setting both `kind` and a conflicting `external`
+   * is the named error `local-edge-kit-kind-conflict`.
+   */
+  kind?: LocalEdgeKit_SupervisedAppKind | undefined;
+  /**
    * Route only: the supervisor never starts, stops, adopts or signals this app's process. It is
-   * listed, probed for health and exposed, nothing more.
+   * listed, probed for health and exposed, nothing more. Replaced by `kind: "external"`; still
+   * accepted.
    */
   external?: boolean | undefined;
   /** Env file whose variable NAMES are checked before start. */
@@ -88,7 +113,8 @@ export type LocalEdgeKit_SupervisedApp = {
    * the names are ever printed.
    */
   launchEnv?: Readonly<Record<string, string>> | (() => Readonly<Record<string, string>>) | undefined;
-  localPort: number;
+  /** Loopback port. Required for `run` and `external` entries; optional for `check` entries. */
+  localPort?: number | undefined;
   /** Edge port for port-based exposure backends. */
   edgePort?: number | undefined;
   /** Host label for name-based backends. Defaults to `id`. */
@@ -106,15 +132,21 @@ export type LocalEdgeKit_SupervisedApp = {
   proxy?: LocalEdgeKit_SupervisedAppProxy | undefined;
   /** Where the app was declared, shown by `status`. Default `project`. */
   source?: string | undefined;
-  /** HTTP path that must answer 2xx/3xx for the app to count as healthy. */
-  healthPath: string;
+  /** HTTP path that must answer 2xx/3xx for the app to count as healthy. Required except for `check` entries. */
+  healthPath?: string | undefined;
   /** Optional second HTTP path that must answer before the app counts as ready. */
   readyPath?: string | undefined;
   /** Optional text that must appear in the log after start before the app counts as ready. */
   readyLogLine?: string | undefined;
-  /** Pid file. Required for enabled apps the supervisor runs. */
+  /**
+   * Pid file. Required for enabled `run` entries, inside `cwd`. An `external` entry may name one
+   * anywhere as an absolute path; it is only read, never written, and its pid is never signalled.
+   */
   pidFile?: string | undefined;
-  /** Log file the process appends to. Required for enabled apps the supervisor runs. */
+  /**
+   * Log file. `run` entries: the process appends to it, inside `cwd`. `external` entries: an
+   * absolute path anywhere, only read (by `logs`).
+   */
   logFile?: string | undefined;
   dependsOn?: readonly string[] | undefined;
   startTimeoutMs?: number | undefined;
@@ -147,7 +179,8 @@ export type LocalEdgeKit_SupervisedAppState =
   | "unverified"
   | "stopped"
   | "disabled"
-  | "external";
+  | "external"
+  | "check";
 
 /** Inspection result for one app. */
 export type LocalEdgeKit_SupervisedAppInspection = {
@@ -159,6 +192,14 @@ export type LocalEdgeKit_SupervisedAppInspection = {
   listenerPids: readonly number[];
   /** The recorded identity, set only when it matched the live process. */
   identity: LocalEdgeKit_ProcessIdentity | null;
+  /**
+   * The live identity (command line and start time) of `pid`, read from the process list, when
+   * the process is alive and is the recorded one, is an unverified pid, or is an external entry's
+   * observed pid. Null otherwise. Never includes the environment.
+   */
+  observed: LocalEdgeKit_ProcessIdentity | null;
+  /** Times the runner restarted the app. Always 0 in this release; the runner sets it later. */
+  restarts: number;
   note: string;
 };
 
@@ -172,6 +213,13 @@ export type LocalEdgeKit_SupervisedAppHealth = {
 /** Host effects the supervisor needs; tests inject fakes for all of them. */
 export type LocalEdgeKit_SupervisorHost = {
   readText(filePath: string): string | null;
+  /**
+   * Reads a file that may live anywhere (an external entry's pid or log file) through
+   * `LocalEdgeKit_readFileSafe`: no symlinks, owned by you and not writable by group or others,
+   * in such a folder, size-bounded. Returns null when the file does not exist and throws the
+   * helper's named error otherwise. Never writes.
+   */
+  readExternalText(filePath: string, options?: { maxBytes?: number | undefined }): string | null;
   /** Replaces a file atomically inside `root`; refuses symlinks and paths that resolve outside. */
   writeText(filePath: string, text: string, options: { root: string; mode?: number | undefined }): void;
   /** Creates a file inside `root` only when none exists. Returns false when it already exists. */
@@ -275,6 +323,8 @@ export function LocalEdgeKit_createSupervisorHost(): LocalEdgeKit_SupervisorHost
   };
   return {
     readText: (filePath) => (existsSync(filePath) ? readFileSync(filePath, "utf8") : null),
+    readExternalText: (filePath, options) =>
+      LocalEdgeKit_readFileSafe(filePath, { root: path.dirname(filePath), ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }),
     writeText: (filePath, text, options) => LocalEdgeKit_writeFileAtomic(filePath, text, options),
     createExclusive: (filePath, text, options) => LocalEdgeKit_createFileExclusive(filePath, text, options),
     ensureDir: (dirPath, options) => {
@@ -377,9 +427,49 @@ export function LocalEdgeKit_resolveAppPath(app: LocalEdgeKit_SupervisedApp, fil
   return path.resolve(app.cwd ?? process.cwd(), filePath);
 }
 
+const LOCAL_EDGE_KIT_APP_KINDS: readonly string[] = ["run", "external", "check"];
+
 /**
- * Validates supervisor apps: unique ids, required fields on enabled apps, unique local ports,
- * known dependencies, enabled apps depending only on enabled apps, and no cycles.
+ * Resolves what an entry is: `kind` when set, otherwise `external` when the older `external` flag
+ * is true, otherwise `run`.
+ *
+ * @param app - The app.
+ * @returns The resolved kind.
+ * @throws Error `local-edge-kit-kind-conflict` when `kind` and `external` disagree (`kind` is not
+ * `external` but `external` is true, or `kind` is `external` and `external` is false), and
+ * `local-edge-kit-kind-unknown` when `kind` is not one of `run`, `external` and `check`. Neither
+ * message repeats more of the value than `LocalEdgeKit_messageWord` allows.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_resolveAppKind({ ...app, external: true }); // "external"
+ * ```
+ */
+export function LocalEdgeKit_resolveAppKind(app: LocalEdgeKit_SupervisedApp): LocalEdgeKit_SupervisedAppKind {
+  if (app.kind === undefined) {
+    return app.external === true ? "external" : "run";
+  }
+  if (!LOCAL_EDGE_KIT_APP_KINDS.includes(app.kind)) {
+    throw Object.assign(
+      new Error(`local-edge-kit-kind-unknown: ${app.id}: kind "${LocalEdgeKit_messageWord(String(app.kind))}" is not run, external or check`),
+      { code: "local-edge-kit-kind-unknown" },
+    );
+  }
+  if (app.external !== undefined && app.external !== (app.kind === "external")) {
+    throw Object.assign(
+      new Error(`local-edge-kit-kind-conflict: ${app.id}: kind "${app.kind}" conflicts with external: ${String(app.external)}; set only kind`),
+      { code: "local-edge-kit-kind-conflict" },
+    );
+  }
+  return app.kind;
+}
+
+/**
+ * Validates supervisor apps: unique ids, a known and consistent kind, required fields per kind,
+ * unique local ports, known dependencies, enabled apps depending only on enabled apps, and no
+ * cycles. `run` entries (enabled) need `cwd`, `command`, `pidFile` and `logFile`; `external`
+ * entries may not set `command` and may name `pidFile` and `logFile` only as absolute paths;
+ * `check` entries (enabled) need `cwd` and `command`, and are the only kind without a port or
+ * health path.
  *
  * @param apps - All configured apps.
  * @returns One line per problem; an empty list means valid. Never throws.
@@ -399,24 +489,47 @@ export function LocalEdgeKit_validateSupervisedApps(apps: readonly LocalEdgeKit_
   }
   const ports = new Map<number, string>();
   for (const app of apps) {
-    if (!app.healthPath.startsWith("/")) {
-      problems.push(`${app.id}: healthPath must start with /`);
+    let kind: LocalEdgeKit_SupervisedAppKind;
+    try {
+      kind = LocalEdgeKit_resolveAppKind(app);
+    } catch (error) {
+      problems.push((error as Error).message);
+      continue;
+    }
+    if (kind !== "check") {
+      if (app.healthPath === undefined || !app.healthPath.startsWith("/")) {
+        problems.push(`${app.id}: healthPath must start with /`);
+      }
+      if (app.localPort === undefined) {
+        problems.push(`${app.id}: ${kind} apps need localPort`);
+      }
     }
     if (!app.enabled) {
       continue;
     }
-    if (app.external === true) {
+    if (kind === "external") {
       if (app.command !== undefined) {
         problems.push(`${app.id}: external apps are route only and may not set command`);
+      }
+      for (const [field, value] of [["pidFile", app.pidFile], ["logFile", app.logFile]] as const) {
+        if (value !== undefined && !path.isAbsolute(value)) {
+          problems.push(`${app.id}: external ${field} must be an absolute path (it is only read)`);
+        }
+      }
+    } else if (kind === "check") {
+      if (!app.cwd || !app.command) {
+        problems.push(`${app.id}: check apps need cwd and command`);
       }
     } else if (!app.cwd || !app.command || !app.pidFile || !app.logFile) {
       problems.push(`${app.id}: enabled apps need cwd, command, pidFile and logFile`);
     }
-    const other = ports.get(app.localPort);
-    if (other !== undefined) {
-      problems.push(`${app.id}: local port ${String(app.localPort)} is also used by ${other}`);
+    if (app.localPort !== undefined && kind !== "check") {
+      const other = ports.get(app.localPort);
+      if (other !== undefined) {
+        problems.push(`${app.id}: local port ${String(app.localPort)} is also used by ${other}`);
+      }
+      ports.set(app.localPort, app.id);
     }
-    ports.set(app.localPort, app.id);
     for (const dep of app.dependsOn ?? []) {
       const target = byId.get(dep);
       if (target === undefined) {
@@ -562,15 +675,60 @@ export function LocalEdgeKit_readPidFile(host: LocalEdgeKit_SupervisorHost, file
   return LocalEdgeKit_parsePidFile(host.readText(filePath)).pid;
 }
 
+/** What an external entry's pid file shows, read through the safe-read helper. */
+type LocalEdgeKit_ExternalObservation = {
+  pid: number | null;
+  observed: LocalEdgeKit_ProcessIdentity | null;
+  processGroup: number | null;
+  note: string;
+};
+
+/**
+ * Reads an external entry's pid file (read-only, through the host's safe read) and looks the pid
+ * up in the process list. Never signals, never writes, never reads the process environment.
+ */
+function LocalEdgeKit_observeExternalPid(app: LocalEdgeKit_SupervisedApp, host: LocalEdgeKit_SupervisorHost): LocalEdgeKit_ExternalObservation {
+  const none = { pid: null, observed: null, processGroup: null };
+  if (!app.pidFile) {
+    return { ...none, note: "" };
+  }
+  if (!path.isAbsolute(app.pidFile)) {
+    return { ...none, note: "pid file not read: external pid files must be absolute paths" };
+  }
+  let text: string | null;
+  try {
+    text = host.readExternalText(app.pidFile);
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    return { ...none, note: `pid file not read (${typeof code === "string" && code.startsWith("local-edge-kit-") ? code : "unreadable"})` };
+  }
+  if (text === null) {
+    return { ...none, note: "pid file not found" };
+  }
+  const { pid } = LocalEdgeKit_parsePidFile(text);
+  if (pid === null) {
+    return { ...none, note: "pid file holds no pid" };
+  }
+  const observed = host.processIdentity(pid);
+  if (observed === null) {
+    return { ...none, note: `pid file names pid ${String(pid)}, which is not running` };
+  }
+  return { pid, observed, processGroup: host.processGroupOf(pid), note: `pid ${String(pid)} observed from the pid file; never signalled` };
+}
+
 /**
  * Inspects one app by pid file, recorded identity and port check. Read-only: never writes or
- * signals.
+ * signals. An `external` entry with a `pidFile` shows the pid observed there (read through the
+ * safe-read helper) and the live process's command line and start time, and is never signalled;
+ * a `check` entry has no process and no port and is reported as `check`.
  *
  * @param app - The app.
  * @param host - Supervisor host.
  * @returns `running`/`starting` only for a live process whose identity matches the recorded one;
  * `unverified` for a live pid without a recorded identity; `stale-pid` for a dead or recycled
- * pid; `port-busy` when the port is held by a process that is not ours.
+ * pid; `port-busy` when the port is held by a process that is not ours; `external` and `check`
+ * for those kinds.
+ * @throws The named kind errors of `LocalEdgeKit_resolveAppKind`.
  * @example
  * ```typescript
  * LocalEdgeKit_inspectSupervisedApp(app, host).state; // "running"
@@ -580,15 +738,28 @@ export function LocalEdgeKit_inspectSupervisedApp(
   app: LocalEdgeKit_SupervisedApp,
   host: LocalEdgeKit_SupervisorHost,
 ): LocalEdgeKit_SupervisedAppInspection {
-  const listenerPids = host.listenerPids(app.localPort);
-  const base = { appId: app.id, listenerPids, identity: null };
+  const kind = LocalEdgeKit_resolveAppKind(app);
+  const listenerPids = app.localPort === undefined ? [] : host.listenerPids(app.localPort);
+  const base = { appId: app.id, listenerPids, identity: null, observed: null, restarts: 0 };
   if (!app.enabled) {
     const busy = listenerPids.length > 0 ? `; port ${String(app.localPort)} is in use` : "";
     return { ...base, state: "disabled", pid: null, processGroup: null, note: `${app.disabledReason ?? "disabled"}${busy}` };
   }
-  if (app.external === true) {
+  if (kind === "check") {
+    return { ...base, state: "check", pid: null, processGroup: null, note: "check; not run by up, down or status in this release" };
+  }
+  if (kind === "external") {
     const listening = listenerPids.length > 0;
-    return { ...base, state: "external", pid: null, processGroup: null, note: `route only; port ${listening ? "listening" : "not listening"}` };
+    const seen = LocalEdgeKit_observeExternalPid(app, host);
+    const route = `route only; port ${listening ? "listening" : "not listening"}`;
+    return {
+      ...base,
+      state: "external",
+      pid: seen.pid,
+      processGroup: seen.processGroup,
+      observed: seen.observed,
+      note: seen.note === "" ? route : `${route}; ${seen.note}`,
+    };
   }
   const parsed = LocalEdgeKit_parsePidFile(app.pidFile ? host.readText(LocalEdgeKit_resolveAppPath(app, app.pidFile)) : null);
   const { pid } = parsed;
@@ -596,7 +767,7 @@ export function LocalEdgeKit_inspectSupervisedApp(
   const check = pid === null ? null : LocalEdgeKit_verifyProcessIdentity({ pid, recorded: parsed.identity, current });
   if (pid !== null && check?.ok === true) {
     const processGroup = host.processGroupOf(pid);
-    const verified = { ...base, pid, processGroup, identity: parsed.identity };
+    const verified = { ...base, pid, processGroup, identity: parsed.identity, observed: current };
     if (listenerPids.length === 0) {
       return { ...verified, state: "starting", note: "process alive, port not listening yet" };
     }
@@ -609,7 +780,7 @@ export function LocalEdgeKit_inspectSupervisedApp(
   const failure = check !== null && !check.ok ? check : null;
   if (pid !== null && (failure?.reason === "unrecorded" || (current === null && host.pidIsAlive(pid)))) {
     const why = failure?.reason === "unrecorded" ? failure.message : `pid ${String(pid)} is alive but its identity cannot be read`;
-    return { ...base, state: "unverified", pid, processGroup: null, note: `${why}; not adopted or signalled, stop it yourself and remove the pid file` };
+    return { ...base, state: "unverified", pid, processGroup: null, observed: failure?.reason === "unrecorded" ? current : null, note: `${why}; not adopted or signalled, stop it yourself and remove the pid file` };
   }
   const stale = failure?.message ?? "";
   if (listenerPids.length > 0) {
@@ -622,13 +793,84 @@ export function LocalEdgeKit_inspectSupervisedApp(
   return { ...base, state: "stopped", pid: null, processGroup: null, note: "not running" };
 }
 
+const LOCAL_EDGE_KIT_PS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Converts a start time as `ps -o lstart=` prints it in the C locale (`Thu Nov 12 03:47:37 2026`,
+ * local time) to an ISO UTC time. Strict: anything that is not exactly that shape, or not a real
+ * date, gives null (a lenient parser would read `start-701` as the year 701).
+ */
+function LocalEdgeKit_isoFromPsStartTime(startedAt: string): string | null {
+  const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(startedAt);
+  const month = LOCAL_EDGE_KIT_PS_MONTHS.indexOf(match?.[1] ?? "");
+  if (match === null || month < 0) {
+    return null;
+  }
+  const [day, hour, minute, second, year] = [match[2], match[3], match[4], match[5], match[6]].map(Number) as [number, number, number, number, number];
+  const date = new Date(year, month, day, hour, minute, second);
+  const real = date.getFullYear() === year && date.getMonth() === month && date.getDate() === day && date.getHours() === hour;
+  return real && !Number.isNaN(date.getTime()) ? date.toISOString() : null;
+}
+
+/** Status fields every catalog entry shows, whatever its kind. */
+export type LocalEdgeKit_SupervisedAppStatusFields = {
+  /** The resolved kind. */
+  kind: LocalEdgeKit_SupervisedAppKind;
+  /** Process group of the observed pid, or null. */
+  processGroup: number | null;
+  /** Command line of the observed pid (control characters removed, at most 200 characters), or null. */
+  commandLine: string | null;
+  /** The working directory as configured, or null. */
+  cwd: string | null;
+  /** The env file path as configured (never its content), or null. */
+  envFile: string | null;
+  /** Whether the env file exists. Checked without reading it. */
+  envFilePresent: boolean;
+  /** ISO time the observed process started, or null. */
+  since: string | null;
+  /** Restarts counted by the runner. Always 0 in this release. */
+  restarts: number;
+};
+
+/**
+ * Builds the status fields of one entry from its inspection. Read-only: the env file is checked
+ * for existence only, and the process environment is never read.
+ *
+ * @param app - The app.
+ * @param inspection - Its inspection (`pid`, `processGroup`, `observed` and `restarts` are used).
+ * @param host - Supervisor host (`realPath` for the env file check).
+ * @returns The fields shown by `status` and `status --json`.
+ * @throws The named kind errors of `LocalEdgeKit_resolveAppKind`.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_supervisedAppStatusFields(app, LocalEdgeKit_inspectSupervisedApp(app, host), host).since;
+ * ```
+ */
+export function LocalEdgeKit_supervisedAppStatusFields(
+  app: LocalEdgeKit_SupervisedApp,
+  inspection: LocalEdgeKit_SupervisedAppInspection,
+  host: LocalEdgeKit_SupervisorHost,
+): LocalEdgeKit_SupervisedAppStatusFields {
+  return {
+    kind: LocalEdgeKit_resolveAppKind(app),
+    processGroup: inspection.processGroup,
+    commandLine: inspection.observed === null ? null : LocalEdgeKit_boundedCommandLine(inspection.observed.command),
+    cwd: app.cwd ?? null,
+    envFile: app.envFile ?? null,
+    envFilePresent: app.envFile !== undefined && host.realPath(LocalEdgeKit_resolveAppPath(app, app.envFile)) !== null,
+    since: inspection.observed === null ? null : LocalEdgeKit_isoFromPsStartTime(inspection.observed.startedAt),
+    restarts: inspection.restarts,
+  };
+}
+
 /**
  * Probes an app's health path (and ready path, when set) on `127.0.0.1`.
  *
  * @param app - The app.
  * @param host - Supervisor host (HTTP through `host.httpStatus`).
  * @param timeoutMs - Per-request timeout. Default 3000.
- * @returns Per-path status; healthy when every path answers 2xx/3xx. Never throws.
+ * @returns Per-path status; healthy when every path answers 2xx/3xx. An app with no port or no
+ * health path (a `check` entry) cannot be probed: it is `healthy: false` with no checks. Never throws.
  * @example
  * ```typescript
  * (await LocalEdgeKit_probeSupervisedAppHealth(app, host)).healthy;
@@ -639,10 +881,14 @@ export async function LocalEdgeKit_probeSupervisedAppHealth(
   host: LocalEdgeKit_SupervisorHost,
   timeoutMs = 3000,
 ): Promise<LocalEdgeKit_SupervisedAppHealth> {
+  if (app.localPort === undefined || app.healthPath === undefined) {
+    return { appId: app.id, healthy: false, checks: [] };
+  }
+  const port = app.localPort;
   const paths = [app.healthPath, ...(app.readyPath ? [app.readyPath] : [])];
   const checks = await Promise.all(
     paths.map(async (probePath) => {
-      const status = await host.httpStatus(`http://127.0.0.1:${String(app.localPort)}${probePath}`, timeoutMs);
+      const status = await host.httpStatus(`http://127.0.0.1:${String(port)}${probePath}`, timeoutMs);
       return { path: probePath, status, ok: LocalEdgeCore_isHealthyHttpStatusCode(status) };
     }),
   );
@@ -889,7 +1135,8 @@ export function LocalEdgeKit_acquireSupervisorLock(
 
 /**
  * Starts the requested apps and their dependencies in order, adopting any that already run
- * (pid file process with a matching identity). Stops at the first failure; later apps are
+ * (pid file process with a matching identity). `external` and `check` entries are skipped
+ * (`check` entries run on demand in a later release). Stops at the first failure; later apps are
  * reported as skipped. Inspection, spawn and pid file publication run under the app's lock.
  *
  * @param options - Apps, requested ids, host and progress writer.
@@ -919,7 +1166,12 @@ export async function LocalEdgeKit_supervisorUp(options: {
       results.push({ appId: app.id, ok: true, action: "skipped", message: app.disabledReason ?? "disabled" });
       continue;
     }
-    if (app.external === true) {
+    const kind = LocalEdgeKit_resolveAppKind(app);
+    if (kind === "check") {
+      results.push({ appId: app.id, ok: true, action: "skipped", message: "check: not run by up in this release" });
+      continue;
+    }
+    if (kind === "external") {
       results.push({ appId: app.id, ok: true, action: "skipped", message: "external: route only, never started" });
       continue;
     }
@@ -1030,7 +1282,8 @@ function LocalEdgeKit_refreshRecordedIdentity(
 }
 
 /**
- * Stops the requested apps, dependants first. Only a pid file process whose recorded identity
+ * Stops the requested apps, dependants first. `external` and `check` entries are skipped, and an
+ * external entry's pid file is never read for a signal. Only a pid file process whose recorded identity
  * matches is signalled, and the identity is checked again before every signal; a foreign
  * listener, a recycled pid and an unverified pid are never touched. Runs under the app's lock.
  *
@@ -1057,7 +1310,11 @@ export function LocalEdgeKit_supervisorDown(options: {
     if (!app.enabled) {
       return { appId: app.id, ok: true, action: "skipped", message: app.disabledReason ?? "disabled" };
     }
-    if (app.external === true || !app.pidFile) {
+    const kind = LocalEdgeKit_resolveAppKind(app);
+    if (kind === "check") {
+      return { appId: app.id, ok: true, action: "skipped", message: "check: not run by down in this release; nothing to stop" };
+    }
+    if (kind === "external" || !app.pidFile) {
       return { appId: app.id, ok: true, action: "skipped", message: "external: route only, never signalled" };
     }
     const taken = LocalEdgeKit_acquireSupervisorLock(app, host);

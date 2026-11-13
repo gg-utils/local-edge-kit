@@ -10,7 +10,7 @@
  * @testing Node test runner (tsx): npm run test -- src/supervisor-cli.unit.test.ts
  *
  * @see src/supervisor.ts - Process inspection, start, stop and health.
- * @documentation reviewed=2026-11-11 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
+ * @documentation reviewed=2026-11-13 standard=FILE_OVERVIEW_STANDARDS_TYPESCRIPT@3
  */
 import { type LocalEdgeCore_ExposureBackend, type LocalEdgeCore_ExposureHostnamesConfig, type LocalEdgeCore_ExposureManifest } from "@gg-utils/local-edge-core/exposure";
 import { type LocalEdgeKit_ExtraAppsSource } from "./extra-apps.js";
@@ -69,7 +69,7 @@ export type LocalEdgeKit_RunSupervisorCliOptions = {
  */
 export declare function LocalEdgeKit_resolveSupervisorConfig(config: LocalEdgeKit_SupervisorConfig): LocalEdgeKit_SupervisorConfig;
 /**
- * Builds the backend-neutral exposure manifest from supervisor apps.
+ * Builds the backend-neutral exposure manifest from supervisor apps. `check` entries (no port) are left out.
  *
  * @param config - Supervisor config.
  * @returns The manifest the core exposure backends plan from.
