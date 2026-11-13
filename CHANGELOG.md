@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.1 - 2026-11-13
+
+Fixes from the first consumer of 0.6.0, and the core pin moves to `v0.5.0`.
+
+- **Core is pinned to `v0.5.0`.** The router config core renders now sets `X-Forwarded-For` and
+  `X-Real-IP` to one value, adds `X-Real-Port`, clears client-sent `Forwarded`, `X-Client-IP` and
+  `True-Client-IP`, and writes an access log with no addresses or query strings. The new
+  `exposure.hostnames` settings `clientAddress` (`"connection"` by default, or `"proxy-protocol"`
+  with `proxyProtocol` ports) and `nginx.errorLogLevel` pass through unchanged; see the core
+  CHANGELOG for 0.5.0. A project that relied on the appended `X-Forwarded-For` or the old access
+  log format sees a change when its router config is next rendered.
+
+- **Fix:** `since` was `null` for a process that started on day 1-9 of a month: `ps -o lstart`
+  pads a single-digit day with two spaces (`Fri Nov  6 08:01:02 2026`) and the strict parser wanted
+  one. It now accepts the padded form and a one-space single-digit day, and stays strict otherwise
+  (a two-digit day with two spaces, three spaces, a missing part and impossible dates are still `null`).
+- **Fix:** `status` now probes the health path of an enabled `external` entry that has a
+  `localPort` and `healthPath`, exactly like a `run` entry (read-only GET on `127.0.0.1` through the
+  host's fetch, same timeout and healthy rule). The health column and `healthStatus` / `healthy` /
+  `health` in `--json` show the result instead of `-` / `null`, so an observe-only entry can show
+  "listening and healthy". `check` entries stay `not run`; a disabled entry is not probed; an
+  unhealthy `external` row does not change the exit code of `status`.
+- **Test:** the ancestor recheck while a file is open is now covered: with `refuseSymlinkedParents`,
+  an ancestor folder swapped for a symlink between the walk and the open is refused with
+  `local-edge-kit-safe-read-changed`.
+- **Docs:** `@param`/`@returns`/`@throws` on the ancestor walk; the orphaned doc block above
+  `processIdentity` on the supervisor host is merged into one comment; the README says that on
+  macOS `os.tmpdir()` (under the `/var` symlink) is refused for external files, so give resolved
+  paths (`/private/var/...`).
+
 ## 0.6.0 - 2026-11-13
 
 First slice of a local runner: the catalog entry gets a kind, and `status` gets read-only fields. Nothing new is started: `up` and `down` behave as before for `run` entries and skip the new `check` entries. The core pin stays `v0.4.1`.

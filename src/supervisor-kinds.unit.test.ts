@@ -454,6 +454,40 @@ void test("since comes from the observed start time and is null when the time is
   }
 });
 
+/** The `since` of an external entry whose pid file names a process with the given start text. */
+function sinceOfStart(start: string): string | null {
+  const host = fakeHost({ processes: [{ pid: 703, group: 703, start, command: "lane" }], files: { "/srv/d.pid": "703\n" } });
+  const app = { ...externalApp, pidFile: "/srv/d.pid" };
+  return LocalEdgeKit_supervisedAppStatusFields(app, LocalEdgeKit_inspectSupervisedApp(app, host), host).since;
+}
+
+void test("since accepts a single-digit day as ps pads it (two spaces), with one space, and a two-digit day", () => {
+  assert.equal(sinceOfStart("Fri Nov  6 08:01:02 2026"), new Date(2026, 10, 6, 8, 1, 2).toISOString());
+  assert.equal(sinceOfStart("Fri Nov 6 08:01:02 2026"), new Date(2026, 10, 6, 8, 1, 2).toISOString());
+  assert.equal(sinceOfStart("Sun Nov  1 00:00:00 2026"), new Date(2026, 10, 1, 0, 0, 0).toISOString());
+  assert.equal(sinceOfStart("Thu Nov 12 03:47:37 2026"), new Date(2026, 10, 12, 3, 47, 37).toISOString());
+  assert.equal(sinceOfStart("Mon Nov 30 23:59:59 2026"), new Date(2026, 10, 30, 23, 59, 59).toISOString());
+});
+
+void test("since stays strict: wrong spacing, a day of three digits or none, a missing part or an impossible date is null", () => {
+  for (const start of [
+    "Thu Nov  12 03:47:37 2026", // two spaces before a two-digit day
+    "Fri Nov   6 08:01:02 2026", // three spaces
+    "Fri Nov 123 08:01:02 2026",
+    "Fri Nov  0 08:01:02 2026", // day 0 is not a date
+    "Fri Nov  32 08:01:02 2026",
+    "Fri Feb 30 08:01:02 2026",
+    "Fri Nov  6 08:01 2026",
+    "Fri Nov   08:01:02 2026",
+    "Fri Nov  6 08:01:02 26",
+    " Fri Nov  6 08:01:02 2026",
+    "Fri Nov  6 08:01:02 2026 ",
+    "",
+  ]) {
+    assert.equal(sinceOfStart(start), null, JSON.stringify(start));
+  }
+});
+
 void test("restarts is 0 from the inspection counter, and shows whatever the runner sets there", () => {
   const host = fakeHost();
   const inspection = LocalEdgeKit_inspectSupervisedApp(runApp, host);
@@ -538,4 +572,62 @@ void test("logs reads an external log through the safe read, shows the last line
   const none = capture();
   assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["logs", "lane"], config: configOf({ ...externalApp, logFile: undefined }), host, stdout: capture().writer, stderr: none.writer }), 2);
   assert.match(none.text(), /has no log file/u);
+});
+
+void test("status probes an external entry with a port and a health path like a run entry: healthy shows ok, in the table and in --json", async () => {
+  const urls: string[] = [];
+  const host = fakeHost({ healthy: (url) => (urls.push(url), 204) });
+  const table = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: configOf(externalApp), host, createBackend, stdout: table.writer, stderr: capture().writer }), 0);
+  assert.match(table.text(), /lane\s+external\s+-\s+127\.0\.0\.1:3100\s+ok\s/u);
+  const { rows } = await statusJson(configOf(externalApp), host);
+  assert.equal(rows[0]?.healthy, true);
+  assert.equal(rows[0]?.healthStatus, "ok");
+  assert.deepEqual(rows[0]?.health, [{ path: "/", status: 204, ok: true }]);
+  assert.deepEqual([...new Set(urls)], ["http://127.0.0.1:3100/"]);
+  assert.equal(host.spawned.length, 0);
+  assert.equal(host.signals.length, 0);
+});
+
+void test("status shows an unhealthy external entry as fail, in the table and in --json, and its exit code stays 0", async () => {
+  const host = fakeHost({ healthy: () => 503 });
+  const table = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: configOf(externalApp), host, createBackend, stdout: table.writer, stderr: capture().writer }), 0);
+  assert.match(table.text(), /lane\s+external\s+-\s+127\.0\.0\.1:3100\s+fail\s/u);
+  const { code, rows } = await statusJson(configOf(externalApp), host);
+  assert.equal(code, 0);
+  assert.equal(rows[0]?.healthy, false);
+  assert.equal(rows[0]?.healthStatus, "fail");
+  assert.deepEqual(rows[0]?.health, [{ path: "/", status: 503, ok: false }]);
+  const silent = fakeHost({ healthy: () => null });
+  assert.equal((await statusJson(configOf(externalApp), silent)).rows[0]?.healthStatus, "fail");
+});
+
+void test("a run entry that is unhealthy still makes status exit 1, next to an external row", async () => {
+  const host = fakeHost({
+    files: { "/w/web/.local/web.pid": `300\n${JSON.stringify({ uid: 501, startedAt: PS_START, command: "node web.js" })}\n` },
+    processes: [{ pid: 300, group: 300, port: 3210, start: PS_START, command: "node web.js" }],
+    healthy: () => 503,
+  });
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: configOf(runApp, externalApp), host, createBackend, stdout: capture().writer, stderr: capture().writer }), 1);
+});
+
+void test("status does not probe a disabled external entry or a check entry; an external entry without a health path is refused as invalid config", async () => {
+  const urls: string[] = [];
+  const host = fakeHost({ healthy: (url) => (urls.push(url), 200) });
+  const disabled = { ...externalApp, id: "off", enabled: false };
+  const { rows } = await statusJson(configOf(disabled, checkApp), host);
+  assert.equal(rows.find((r) => r.id === "off")?.state, "disabled");
+  assert.equal(rows.find((r) => r.id === "off")?.healthStatus, null);
+  assert.equal(rows.find((r) => r.id === "lint")?.healthStatus, "not run");
+  const table = capture();
+  await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: configOf(disabled, checkApp), host, createBackend, stdout: table.writer, stderr: capture().writer });
+  assert.match(table.text(), /off\s+disabled\s+-\s+127\.0\.0\.1:3100\s+-\s/u);
+  assert.match(table.text(), /lint\s+check\s+-\s+-\s+not run\s/u);
+  const bare = { ...externalApp, id: "bare", healthPath: undefined };
+  const stderr = capture();
+  const code = await LocalEdgeKit_runSupervisorCli({ args: ["status"], config: configOf(bare), host, createBackend, stdout: capture().writer, stderr: stderr.writer });
+  assert.equal(code, 2);
+  assert.match(stderr.text(), /bare: healthPath must start with \//u);
+  assert.deepEqual(urls, []);
 });

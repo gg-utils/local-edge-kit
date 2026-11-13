@@ -10,7 +10,7 @@ surface IDs, route labels, process commands, env overlays, prompts, and host mut
 ## Install
 
 ```bash
-npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0
+npm install @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1
 ```
 
 Pinned dependency example:
@@ -18,7 +18,7 @@ Pinned dependency example:
 ```json
 {
   "dependencies": {
-    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0"
+    "@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1"
   }
 }
 ```
@@ -217,7 +217,9 @@ Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run"
   `LocalEdgeKit_readFileSafe` (`readExternalText` on the supervisor host): no symlinks anywhere in
   the path (not the file, not its folder, not any folder above it; a symlinked parent is refused
   with `local-edge-kit-safe-read-symlinked-parent`, so give the real path, for example
-  `/private/var/...` rather than `/var/...` on macOS), owned by you and not writable by group or
+  `/private/var/...` rather than `/var/...` on macOS; `os.tmpdir()` there is under `/var`, a
+  symlink, so an external file in a temp folder is refused until you pass its resolved path, for
+  example from `fs.realpathSync(os.tmpdir())`), owned by you and not writable by group or
   others, in a folder with the same rules, at most 256 KiB for a pid file and 8 MiB for a log (a
   log over 8 MiB is refused with `local-edge-kit-safe-read-too-large`, not truncated). A FIFO or
   a directory is refused as not a regular file. Nothing is written to them and the pid in a pid file is never signalled
@@ -246,6 +248,13 @@ Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run"
   and keeps the long ones out; `status --json` carries all of them (there is no `--wide` view).
   JSON rows also have `healthStatus` (`ok`, `fail`, `not run` or `null` when not probed) and
   `localPort` is `null` for a `check` entry.
+  `status` probes the health path (and ready path) of a `run` entry that is running and of an enabled
+  `external` entry, with a read-only HTTP GET on `127.0.0.1` through the host's fetch (same timeout
+  and the same healthy rule: 2xx/3xx), so an observe-only entry can show "listening and healthy".
+  A `check` entry is never probed (`not run`), and neither is a disabled entry. An unhealthy
+  `external` row shows `fail` but does not change the exit code of `status`; a running `run` entry
+  that is unhealthy still does. The `since` start time accepts the single-digit day as `ps` pads it
+  (`Fri Nov  6 08:01:02 2026`).
 
 ## CLI
 
@@ -253,7 +262,7 @@ The package exposes a `local-edge-kit` bin for script adapters that can execute 
 directly:
 
 ```bash
-npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0 local-edge-kit --help
+npx @gg-utils/local-edge-kit@git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1 local-edge-kit --help
 ```
 
 Most consumers should create a small repo-local executable that imports `LocalEdgeKit_runCli` and
@@ -295,7 +304,7 @@ Run `npm ci --ignore-scripts` before development checks.
 Requires Node `>=22.0.0 <27`. Add this dependency; built JavaScript and declarations are included, with no install build step:
 
 ```json
-"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.0"
+"@gg-utils/local-edge-kit": "git+https://github.com/gg-utils/local-edge-kit.git#v0.6.1"
 ```
 
 The `local-edge-kit` binary intentionally exits with code 2 and asks for a repository adapter. It does not load config or start a service. Create `scripts/local-edge.js`:

@@ -240,10 +240,10 @@ export type LocalEdgeKit_SupervisorHost = {
   removeFile(filePath: string): void;
   fileSize(filePath: string): number;
   pidIsAlive(pid: number): boolean;
-  /** Owner uid, start time and command line of a live process, or null when it is gone. */
   /**
-   * Reads a live process's identity. `readLaunchId: false` skips the process environment (used
-   * for pids the supervisor did not start); the default reads it for the launch id.
+   * Owner uid, start time and command line of a live process, or null when it is gone.
+   * `readLaunchId: false` skips the process environment (used for pids the supervisor did not
+   * start); the default reads it for the launch id.
    */
   processIdentity(pid: number, options?: { readLaunchId?: boolean | undefined }): LocalEdgeKit_ProcessIdentity | null;
   /** The supervisor's own pid (lock owner). */
@@ -810,14 +810,15 @@ const LOCAL_EDGE_KIT_PS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul
 
 /**
  * Converts a start time as `ps -o lstart=` prints it in the C locale (`Thu Nov 12 03:47:37 2026`,
- * local time) to an ISO UTC time. Strict: anything that is not exactly that shape, or not a real
+ * local time) to an ISO UTC time. A single-digit day is accepted as `ps` pads it (`Fri Nov  6 08:01:02 2026`,
+ * two spaces) or with one space. Strict otherwise: anything that is not exactly that shape, or not a real
  * date, gives null (a lenient parser would read `start-701` as the year 701).
  *
  * @param startedAt - The start time as the process list printed it.
  * @returns The ISO UTC time, or null when the text is not exactly that shape or not a real date.
  */
 function LocalEdgeKit_isoFromPsStartTime(startedAt: string): string | null {
-  const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(startedAt);
+  const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{2}| ?\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(startedAt);
   const month = LOCAL_EDGE_KIT_PS_MONTHS.indexOf(match?.[1] ?? "");
   if (match === null || month < 0) {
     return null;

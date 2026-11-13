@@ -316,9 +316,13 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
         const rows = await Promise.all(
           config.apps.map(async (app) => {
             const inspection = LocalEdgeKit_inspectSupervisedApp(app, host);
-            const health =
-              inspection.state === "running" ? await LocalEdgeKit_probeSupervisedAppHealth(app, host) : null;
             const fields = LocalEdgeKit_supervisedAppStatusFields(app, inspection, host);
+            // A route-only (external) entry has no process of ours to look at, so it is probed
+            // whenever it names a port and a health path: that is what shows "listening and healthy".
+            const probed =
+              inspection.state === "running" ||
+              (inspection.state === "external" && app.localPort !== undefined && app.healthPath !== undefined);
+            const health = probed ? await LocalEdgeKit_probeSupervisedAppHealth(app, host) : null;
             return { app, inspection, health, fields, edge: edge.get(app.id) ?? null };
           }),
         );
@@ -407,7 +411,9 @@ export async function LocalEdgeKit_runSupervisorCli(options: LocalEdgeKit_RunSup
           );
         }
         const routerDown = router !== null && router.inspection.state !== "running";
-        return routerDown || rows.some((row) => row.app.enabled && row.health !== null && !row.health.healthy) ? 1 : 0;
+        // An observe-only (external) row shows its health but never changes the exit code, as before.
+        const failed = rows.some((row) => row.app.enabled && row.inspection.state !== "external" && row.health !== null && !row.health.healthy);
+        return routerDown || failed ? 1 : 0;
       }
       case "health": {
         const ids = LocalEdgeKit_selectIds(config, appPositionals);
