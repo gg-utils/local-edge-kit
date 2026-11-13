@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Test:** the ancestor recheck while a file is open is now covered: with `refuseSymlinkedParents`,
+  an ancestor folder swapped for a symlink between the walk and the open is refused with
+  `local-edge-kit-safe-read-changed`.
+- **Docs:** `@param`/`@returns`/`@throws` on the ancestor walk; the orphaned doc block above
+  `processIdentity` on the supervisor host is merged into one comment; the README says that on
+  macOS `os.tmpdir()` (under the `/var` symlink) is refused for external files, so give resolved
+  paths (`/private/var/...`).
+
 ## 0.6.0 - 2026-11-13
 
 First slice of a local runner: the catalog entry gets a kind, and `status` gets read-only fields. Nothing new is started: `up` and `down` behave as before for `run` entries and skip the new `check` entries. The core pin stays `v0.4.1`.

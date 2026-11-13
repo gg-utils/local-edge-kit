@@ -276,6 +276,48 @@ void test("a symlink swapped in just before the open is the named symlink error,
   }
 });
 
+void test("with refuseSymlinkedParents an ancestor swapped for a symlink while the file is open is the read-changed error", () => {
+  const base = realpathSync(mkdtempSync(path.join(os.tmpdir(), "safe-read-anc-")));
+  try {
+    const outer = path.join(base, "outer");
+    const root = path.join(outer, "cfg");
+    const file = path.join(root, "apps.json");
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    chmodSync(root, 0o700);
+    writeFileSync(file, MARKER, { mode: 0o600 });
+    chmodSync(file, 0o600);
+    // Sanity: without a swap the read succeeds, so the refusal below is caused by the swap.
+    assert.equal(LocalEdgeKit_readFileSafe(file, { root, refuseSymlinkedParents: true }), MARKER);
+    let swapped = false;
+    assert.throws(
+      () =>
+        LocalEdgeKit_readFileSafe(file, {
+          root,
+          refuseSymlinkedParents: true,
+          hooks: {
+            beforeOpen: () => {
+              // An ancestor above the root becomes a symlink to the moved folder: the root and the
+              // file keep their device and inode and the path still opens, so only the recheck of
+              // the ancestors sees it.
+              renameSync(outer, `${outer}.old`);
+              symlinkSync(`${outer}.old`, outer);
+              swapped = true;
+            },
+          },
+        }),
+      (error: Error) => {
+        assert.equal(error.message, `local-edge-kit-safe-read-changed: folder ${outer} changed during the read`);
+        assert.equal((error as Error & { code?: string }).code, "local-edge-kit-safe-read-changed");
+        assert.ok(!error.message.includes(MARKER), "never the content");
+        return true;
+      },
+    );
+    assert.ok(swapped, "the swap hook ran");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 void test("a file where a folder is expected is the named not-a-folder error", () => {
   const b = box();
   try {

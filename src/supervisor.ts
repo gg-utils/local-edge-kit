@@ -240,10 +240,10 @@ export type LocalEdgeKit_SupervisorHost = {
   removeFile(filePath: string): void;
   fileSize(filePath: string): number;
   pidIsAlive(pid: number): boolean;
-  /** Owner uid, start time and command line of a live process, or null when it is gone. */
   /**
-   * Reads a live process's identity. `readLaunchId: false` skips the process environment (used
-   * for pids the supervisor did not start); the default reads it for the launch id.
+   * Owner uid, start time and command line of a live process, or null when it is gone.
+   * `readLaunchId: false` skips the process environment (used for pids the supervisor did not
+   * start); the default reads it for the launch id.
    */
   processIdentity(pid: number, options?: { readLaunchId?: boolean | undefined }): LocalEdgeKit_ProcessIdentity | null;
   /** The supervisor's own pid (lock owner). */

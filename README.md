@@ -217,7 +217,9 @@ Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run"
   `LocalEdgeKit_readFileSafe` (`readExternalText` on the supervisor host): no symlinks anywhere in
   the path (not the file, not its folder, not any folder above it; a symlinked parent is refused
   with `local-edge-kit-safe-read-symlinked-parent`, so give the real path, for example
-  `/private/var/...` rather than `/var/...` on macOS), owned by you and not writable by group or
+  `/private/var/...` rather than `/var/...` on macOS; `os.tmpdir()` there is under `/var`, a
+  symlink, so an external file in a temp folder is refused until you pass its resolved path, for
+  example from `fs.realpathSync(os.tmpdir())`), owned by you and not writable by group or
   others, in a folder with the same rules, at most 256 KiB for a pid file and 8 MiB for a log (a
   log over 8 MiB is refused with `local-edge-kit-safe-read-too-large`, not truncated). A FIFO or
   a directory is refused as not a regular file. Nothing is written to them and the pid in a pid file is never signalled

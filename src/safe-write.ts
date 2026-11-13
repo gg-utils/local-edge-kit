@@ -254,6 +254,12 @@ function LocalEdgeKit_walkDirsForRead(realRoot: string, relativeDir: string): Lo
  * Walks the path of `root` from the filesystem root, one folder at a time with `lstat`, and
  * returns every folder on the way (the last one is `root`). Returns null when a folder is
  * missing. A symlink on the way is `symlinked-parent`; a non-folder is `not-a-folder`.
+ *
+ * @param root - Absolute, resolved path of the root folder whose ancestors are walked.
+ * @returns Every folder from the filesystem root down to `root` with its device, inode, mode and
+ * owner, or null when a folder on the way does not exist.
+ * @throws Error `local-edge-kit-safe-read-symlinked-parent` for a symlink on the way and
+ * `local-edge-kit-safe-read-not-a-folder` for a non-folder.
  */
 function LocalEdgeKit_walkAncestorsForRead(root: string): LocalEdgeKit_CheckedDir[] | null {
   const parsed = path.parse(root);
