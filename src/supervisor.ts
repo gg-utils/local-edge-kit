@@ -195,7 +195,8 @@ export type LocalEdgeKit_SupervisedAppInspection = {
   /**
    * The live identity (command line and start time) of `pid`, read from the process list, when
    * the process is alive and is the recorded one, is an unverified pid, or is an external entry's
-   * observed pid. Null otherwise. Never includes the environment.
+   * observed pid. Null otherwise. For an external entry's pid it is read without the process
+   * environment (no launch id). Its `command` and `startedAt` are what status shows.
    */
   observed: LocalEdgeKit_ProcessIdentity | null;
   /** Times the runner restarted the app. Always 0 in this release; the runner sets it later. */
@@ -215,8 +216,9 @@ export type LocalEdgeKit_SupervisorHost = {
   readText(filePath: string): string | null;
   /**
    * Reads a file that may live anywhere (an external entry's pid or log file) through
-   * `LocalEdgeKit_readFileSafe`: no symlinks, owned by you and not writable by group or others,
-   * in such a folder, size-bounded. Returns null when the file does not exist and throws the
+   * `LocalEdgeKit_readFileSafe`: no symlink in the file or in any folder of its path (a symlinked
+   * parent is `local-edge-kit-safe-read-symlinked-parent`), owned by you and not writable by
+   * group or others, in such a folder, size-bounded. Returns null when the file does not exist and throws the
    * helper's named error otherwise. Never writes.
    */
   readExternalText(filePath: string, options?: { maxBytes?: number | undefined }): string | null;
@@ -239,7 +241,11 @@ export type LocalEdgeKit_SupervisorHost = {
   fileSize(filePath: string): number;
   pidIsAlive(pid: number): boolean;
   /** Owner uid, start time and command line of a live process, or null when it is gone. */
-  processIdentity(pid: number): LocalEdgeKit_ProcessIdentity | null;
+  /**
+   * Reads a live process's identity. `readLaunchId: false` skips the process environment (used
+   * for pids the supervisor did not start); the default reads it for the launch id.
+   */
+  processIdentity(pid: number, options?: { readLaunchId?: boolean | undefined }): LocalEdgeKit_ProcessIdentity | null;
   /** The supervisor's own pid (lock owner). */
   ownPid(): number;
   processGroupOf(pid: number): number | null;
@@ -324,7 +330,7 @@ export function LocalEdgeKit_createSupervisorHost(): LocalEdgeKit_SupervisorHost
   return {
     readText: (filePath) => (existsSync(filePath) ? readFileSync(filePath, "utf8") : null),
     readExternalText: (filePath, options) =>
-      LocalEdgeKit_readFileSafe(filePath, { root: path.dirname(filePath), ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }),
+      LocalEdgeKit_readFileSafe(filePath, { root: path.dirname(filePath), refuseSymlinkedParents: true, ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }),
     writeText: (filePath, text, options) => LocalEdgeKit_writeFileAtomic(filePath, text, options),
     createExclusive: (filePath, text, options) => LocalEdgeKit_createFileExclusive(filePath, text, options),
     ensureDir: (dirPath, options) => {
@@ -359,7 +365,7 @@ export function LocalEdgeKit_createSupervisorHost(): LocalEdgeKit_SupervisorHost
         return (error as NodeJS.ErrnoException).code === "EPERM";
       }
     },
-    processIdentity: (pid) => LocalEdgeKit_readProcessIdentity(pid),
+    processIdentity: (pid, options) => LocalEdgeKit_readProcessIdentity(pid, options),
     ownPid: () => process.pid,
     processGroupOf,
     parentOf: (pid) => {
@@ -685,7 +691,14 @@ type LocalEdgeKit_ExternalObservation = {
 
 /**
  * Reads an external entry's pid file (read-only, through the host's safe read) and looks the pid
- * up in the process list. Never signals, never writes, never reads the process environment.
+ * up in the process list. Never signals and never writes. The pid was not started by the
+ * supervisor, so its identity is uid, start time and command line only: the lookup passes
+ * `readLaunchId: false`, and the process environment is not read.
+ *
+ * @param app - The external app.
+ * @param host - Supervisor host (`readExternalText`, `processIdentity`, `processGroupOf`).
+ * @returns The pid, the live identity and process group (null when none), and a note naming
+ * what was found or the refusal code, never a path or file content.
  */
 function LocalEdgeKit_observeExternalPid(app: LocalEdgeKit_SupervisedApp, host: LocalEdgeKit_SupervisorHost): LocalEdgeKit_ExternalObservation {
   const none = { pid: null, observed: null, processGroup: null };
@@ -709,7 +722,7 @@ function LocalEdgeKit_observeExternalPid(app: LocalEdgeKit_SupervisedApp, host: 
   if (pid === null) {
     return { ...none, note: "pid file holds no pid" };
   }
-  const observed = host.processIdentity(pid);
+  const observed = host.processIdentity(pid, { readLaunchId: false });
   if (observed === null) {
     return { ...none, note: `pid file names pid ${String(pid)}, which is not running` };
   }
@@ -799,6 +812,9 @@ const LOCAL_EDGE_KIT_PS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul
  * Converts a start time as `ps -o lstart=` prints it in the C locale (`Thu Nov 12 03:47:37 2026`,
  * local time) to an ISO UTC time. Strict: anything that is not exactly that shape, or not a real
  * date, gives null (a lenient parser would read `start-701` as the year 701).
+ *
+ * @param startedAt - The start time as the process list printed it.
+ * @returns The ISO UTC time, or null when the text is not exactly that shape or not a real date.
  */
 function LocalEdgeKit_isoFromPsStartTime(startedAt: string): string | null {
   const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(startedAt);
@@ -834,7 +850,8 @@ export type LocalEdgeKit_SupervisedAppStatusFields = {
 
 /**
  * Builds the status fields of one entry from its inspection. Read-only: the env file is checked
- * for existence only, and the process environment is never read.
+ * for existence only (it is not opened), and this function reads no process environment. No
+ * environment value of any process is ever part of the fields.
  *
  * @param app - The app.
  * @param inspection - Its inspection (`pid`, `processGroup`, `observed` and `restarts` are used).

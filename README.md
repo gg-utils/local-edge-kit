@@ -214,23 +214,29 @@ Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run"
   Running them on demand comes in a later release.
 - **External pid and log files, read only.** An `external` entry may name `pidFile` and `logFile`
   anywhere, as absolute paths (a relative path is a config error). They are only read, through
-  `LocalEdgeKit_readFileSafe` (`readExternalText` on the supervisor host): no symlinks, owned by you
-  and not writable by group or others, in a folder with the same rules, at most 256 KiB for a pid
-  file and 8 MiB for a log. Nothing is written to them and the pid in a pid file is never signalled
+  `LocalEdgeKit_readFileSafe` (`readExternalText` on the supervisor host): no symlinks anywhere in
+  the path (not the file, not its folder, not any folder above it; a symlinked parent is refused
+  with `local-edge-kit-safe-read-symlinked-parent`, so give the real path, for example
+  `/private/var/...` rather than `/var/...` on macOS), owned by you and not writable by group or
+  others, in a folder with the same rules, at most 256 KiB for a pid file and 8 MiB for a log (a
+  log over 8 MiB is refused with `local-edge-kit-safe-read-too-large`, not truncated). A FIFO or
+  a directory is refused as not a regular file. Nothing is written to them and the pid in a pid file is never signalled
   (`up` and `down` skip external entries). A file the safe read refuses (for example a pid file in
   a world-writable folder such as `/tmp`) leaves the pid empty, and the note names the refusal
   code, never the path or the content. `run` entries keep the inside-`cwd` rule, and their pid
   files are never read through this path.
 - **Observed pid.** When an external entry has a readable `pidFile` naming a live process, `status`
   shows that pid, its process group, command line and start time as observed. The process was not
-  started by the supervisor and its identity is not verified; the pid is information only.
+  started by the supervisor and its identity is not verified; the pid is information only. The
+  lookup uses the process list only (uid, start time, command line): the process's environment is
+  not read for an external pid (no `ps -E`, no `/proc/<pid>/environ`), and it has no launch id.
 - **Status fields.** Every row, whatever the kind, has:
 
 | Field | Meaning |
 |---|---|
 | `kind` | The resolved kind. |
 | `processGroup` | Process group of the observed pid, or `null`. |
-| `commandLine` | Command line of the observed pid as the process list prints it, control characters removed and cut to 200 characters (the last `…` when cut); `null` when no process is observed. The environment is never read. Keep secrets out of argv. |
+| `commandLine` | Command line of the observed pid as the process list prints it, control characters, bidi and other format characters (Unicode `Cf`, U+2028 and U+2029) removed and cut to 200 characters (the last `…` when cut); `null` when no process is observed. No environment value is ever shown. Keep secrets out of argv. |
 | `cwd` | The working directory as configured, or `null`. |
 | `envFile`, `envFilePresent` | The env file path as configured (never its content) and whether it exists. The file is not opened. |
 | `since` | ISO time the observed process started, from the process list's start time (to the second); `null` when unknown. |

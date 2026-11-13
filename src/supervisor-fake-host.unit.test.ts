@@ -44,6 +44,8 @@ export type FakeSupervisorHost = LocalEdgeKit_SupervisorHost & {
   lockAttempts: string[];
   /** Every path read through `readExternalText`, in order. */
   externalReads: string[];
+  /** Every `processIdentity` call: the pid and whether the launch id (process environment) was asked for. */
+  identityReads: { pid: number; readLaunchId: boolean }[];
 };
 
 /** In-memory host. Processes are pids with a group, alive flag and optional listening port. */
@@ -86,6 +88,7 @@ export function fakeHost(seed: {
   let nextPid = 9000;
   const lockAttempts: string[] = [];
   const externalReads: string[] = [];
+  const identityReads: { pid: number; readLaunchId: boolean }[] = [];
   const host: FakeSupervisorHost = {
     signals,
     spawned,
@@ -95,6 +98,7 @@ export function fakeHost(seed: {
     processes,
     lockAttempts,
     externalReads,
+    identityReads,
     readText: (filePath) => {
       const text = files.get(filePath) ?? null;
       seed.onRead?.(filePath, text);
@@ -123,7 +127,8 @@ export function fakeHost(seed: {
     removeFile: (filePath) => void files.delete(filePath),
     fileSize: (filePath) => (files.get(filePath) ?? "").length,
     pidIsAlive: (pid) => processes.get(pid)?.alive === true,
-    processIdentity: (pid) => {
+    processIdentity: (pid, options) => {
+      identityReads.push({ pid, readLaunchId: options?.readLaunchId !== false });
       if (pid === 1000) {
         return fakeIdentity(1000);
       }

@@ -2,8 +2,10 @@
  * @fileoverview Verifies the catalog kinds (`run`, `external`, `check`) and the read-only status
  * fields: kind resolution and its named errors, per-kind validation, `up` and `down` skipping
  * `external` and `check` entries, external pid and log files that are only read (through the
- * safe-read helper), and the new `status` columns and `--json` fields. Every host effect is a
- * stub: nothing is spawned, signalled or fetched, and no address is contacted.
+ * safe-read helper: world-writable folder, FIFO, directory, symlinked parent, the 8 MiB log cap,
+ * and no process-environment lookup for an observed pid), and the new `status` columns and
+ * `--json` fields. Every host effect is a stub: nothing is spawned, signalled or fetched, and no
+ * address is contacted. The real-host tests use private temporary folders only.
  *
  * @testing Node test runner (tsx): npm run test -- src/supervisor-kinds.unit.test.ts
  *
@@ -13,7 +15,8 @@
  */
 
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -267,6 +270,127 @@ void test("the real host reads an external file only through the safe read: priv
   assert.equal(readFileSync(pidFile, "utf8"), "700\n");
 });
 
+/** A fresh private folder under the real temp folder, removed by the caller's `finally`. */
+function privateDir(prefix: string): string {
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), prefix)));
+  chmodSync(dir, 0o700);
+  return dir;
+}
+
+/** The real host's safe external read on a stub host, so a status or logs run reads real temp files. */
+function hostReadingRealFiles() {
+  const real = LocalEdgeKit_createSupervisorHost();
+  return Object.assign(fakeHost(), { readExternalText: (filePath: string, options?: { maxBytes?: number | undefined }) => real.readExternalText(filePath, options) });
+}
+
+void test("the real host refuses an external file in a world-writable folder, even with the sticky bit", () => {
+  const dir = privateDir("kit-ext-ww-");
+  try {
+    const host = LocalEdgeKit_createSupervisorHost();
+    const file = path.join(dir, "lane.pid");
+    writeFileSync(file, "700\n", { mode: 0o600 });
+    assert.equal(host.readExternalText(file), "700\n");
+    for (const mode of [0o777, 0o1777, 0o770]) {
+      chmodSync(dir, mode);
+      assert.throws(() => host.readExternalText(file), { code: "local-edge-kit-safe-read-unsafe-mode" }, `folder mode ${mode.toString(8)}`);
+    }
+  } finally {
+    chmodSync(dir, 0o700);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+void test("the real host refuses an external pid path that is a FIFO or a directory, without blocking", { skip: process.platform === "win32" }, () => {
+  const dir = privateDir("kit-ext-kind-");
+  try {
+    const host = LocalEdgeKit_createSupervisorHost();
+    const fifo = path.join(dir, "fifo.pid");
+    assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+    assert.throws(() => host.readExternalText(fifo), { code: "local-edge-kit-safe-read-not-file" });
+    const folder = path.join(dir, "folder.pid");
+    mkdirSync(folder, { mode: 0o700 });
+    assert.throws(() => host.readExternalText(folder), { code: "local-edge-kit-safe-read-not-file" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+void test("the real host refuses an external file below a symlinked parent folder, at any level of the path", () => {
+  const dir = privateDir("kit-ext-link-");
+  try {
+    const host = LocalEdgeKit_createSupervisorHost();
+    const real = path.join(dir, "real");
+    mkdirSync(path.join(real, "sub"), { recursive: true, mode: 0o700 });
+    chmodSync(real, 0o700);
+    chmodSync(path.join(real, "sub"), 0o700);
+    writeFileSync(path.join(real, "lane.pid"), "700\n", { mode: 0o600 });
+    writeFileSync(path.join(real, "sub", "lane.pid"), "701\n", { mode: 0o600 });
+    assert.equal(host.readExternalText(path.join(real, "lane.pid")), "700\n");
+    assert.equal(host.readExternalText(path.join(real, "sub", "lane.pid")), "701\n");
+    const link = path.join(dir, "link");
+    symlinkSync(real, link);
+    const refused = { code: "local-edge-kit-safe-read-symlinked-parent" };
+    assert.throws(() => host.readExternalText(path.join(link, "lane.pid")), refused, "the parent folder is a symlink");
+    assert.throws(() => host.readExternalText(path.join(link, "sub", "lane.pid")), refused, "a folder above the parent is a symlink");
+    const top = path.join(dir, "top");
+    symlinkSync(dir, top);
+    assert.throws(() => host.readExternalText(path.join(top, "real", "sub", "lane.pid")), refused, "a folder far above the parent is a symlink");
+    assert.throws(() => host.readExternalText(path.join(link, "missing", "lane.pid")), refused, "a symlink is refused before a missing folder is noticed");
+    assert.equal(host.readExternalText(path.join(real, "missing", "lane.pid")), null, "a missing folder on a real path is not found");
+    // Status shows the refusal code and no pid, and never the path.
+    const app: LocalEdgeKit_SupervisedApp = { ...externalApp, pidFile: path.join(link, "lane.pid") };
+    const inspection = LocalEdgeKit_inspectSupervisedApp(app, hostReadingRealFiles());
+    assert.equal(inspection.pid, null);
+    assert.match(inspection.note, /pid file not read \(local-edge-kit-safe-read-symlinked-parent\)/u);
+    assert.ok(!inspection.note.includes(dir), inspection.note);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+void test("logs reads an external log of exactly 8 MiB and refuses one byte more", async () => {
+  const dir = privateDir("kit-ext-cap-");
+  try {
+    const cap = 8 * 1024 * 1024;
+    const logFile = path.join(dir, "lane.log");
+    const app: LocalEdgeKit_SupervisedApp = { ...externalApp, logFile };
+    const run = async () => {
+      const stdout = capture();
+      const stderr = capture();
+      const code = await LocalEdgeKit_runSupervisorCli({ args: ["logs", "lane", "-n", "1"], config: configOf(app), host: hostReadingRealFiles(), stdout: stdout.writer, stderr: stderr.writer });
+      return { code, stdout: stdout.text(), stderr: stderr.text() };
+    };
+    writeFileSync(logFile, Buffer.alloc(cap, "abcd\n"), { mode: 0o600 });
+    const atCap = await run();
+    assert.equal(atCap.code, 0, atCap.stderr);
+    assert.ok(atCap.stdout.length > 0);
+    writeFileSync(logFile, Buffer.alloc(cap + 1, "abcd\n"), { mode: 0o600 });
+    const over = await run();
+    assert.equal(over.code, 2);
+    assert.match(over.stderr, /local-edge-kit-safe-read-too-large/u);
+    assert.equal(over.stdout, "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+void test("an observed external pid is read without its process environment: no launch id is asked for", () => {
+  const external = fakeHost({
+    files: { "/srv/lane/lane.pid": "700\n" },
+    processes: [{ pid: 700, group: 690, start: PS_START, command: "lane --serve", launchId: "a".repeat(32) }],
+  });
+  const seen = LocalEdgeKit_inspectSupervisedApp(externalApp, external);
+  assert.deepEqual(external.identityReads, [{ pid: 700, readLaunchId: false }]);
+  assert.equal(seen.observed?.command, "lane --serve");
+  // Control: a run entry's pid keeps the launch-id check, which does read the environment.
+  const run = fakeHost({
+    files: { "/w/web/.local/web.pid": "300\n" },
+    processes: [{ pid: 300, group: 300, port: 3210, start: PS_START, command: "node web.js" }],
+  });
+  LocalEdgeKit_inspectSupervisedApp(runApp, run);
+  assert.deepEqual(run.identityReads, [{ pid: 300, readLaunchId: true }]);
+});
+
 void test("status --json carries kind, processGroup, commandLine, cwd, envFile, envFilePresent, since and restarts for every kind", async () => {
   const run: LocalEdgeKit_SupervisedApp = { ...runApp, envFile: ".env.local" };
   const host = fakeHost({
@@ -349,6 +473,29 @@ void test("commandLine is bounded: control characters removed and at most 200 ch
   const fields = LocalEdgeKit_supervisedAppStatusFields(externalApp, LocalEdgeKit_inspectSupervisedApp(externalApp, host), host);
   assert.equal(fields.commandLine?.length, 200);
   assert.ok(!/[\u0000-\u001f]/u.test(fields.commandLine ?? ""));
+});
+
+void test("commandLine drops bidirectional and other format characters, one class at a time", () => {
+  const classes: Record<string, string[]> = {
+    "C0 controls": ["\u0000", "\u0007", "\u001b", "\u001f"],
+    "DEL and C1 controls": ["\u007f", "\u0085", "\u009f"],
+    "bidi embeddings and overrides U+202A-U+202E": ["‪", "‫", "‬", "‭", "‮"],
+    "bidi isolates U+2066-U+2069": ["⁦", "⁧", "⁨", "⁩"],
+    "line and paragraph separators U+2028, U+2029": [" ", " "],
+    "zero-width and direction marks U+200B-U+200F": ["​", "‌", "‍", "‎", "‏"],
+    "byte order mark U+FEFF": ["﻿"],
+    "other Cf: soft hyphen, Arabic letter mark, word joiner, tag character": ["­", "؜", "⁠", "\u{e0041}"],
+  };
+  for (const [name, characters] of Object.entries(classes)) {
+    for (const character of characters) {
+      const code = character.codePointAt(0)?.toString(16);
+      assert.equal(LocalEdgeKit_boundedCommandLine(`node a${character}b`), "node ab", `${name}: U+${code ?? "?"} must be removed`);
+    }
+  }
+  // The classic spoof: a right-to-left override reorders what the terminal shows.
+  assert.equal(LocalEdgeKit_boundedCommandLine("run ‮gpj.exe"), "run gpj.exe");
+  // Ordinary text, including non-ASCII letters, is kept.
+  assert.equal(LocalEdgeKit_boundedCommandLine("node café 日本語 😀"), "node café 日本語 😀");
 });
 
 void test("the table shows the short fields; command line, cwd and env file are only in --json", async () => {

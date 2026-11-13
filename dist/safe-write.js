@@ -25,7 +25,8 @@
  * Reads (`LocalEdgeKit_readFileSafe`) use the same walk without creating anything, a
  * non-blocking `O_NOFOLLOW` open and the same chain and descriptor recheck before the bytes are
  * read, then refuse a file or folder that group or others can write or that another user owns,
- * and a file over the size limit.
+ * and a file over the size limit. With `refuseSymlinkedParents` the path of the root and every
+ * folder above it are walked too, and a symlink anywhere in it is refused.
  *
  * @example
  * ```typescript
@@ -162,6 +163,31 @@ function LocalEdgeKit_walkDirsForRead(realRoot, relativeDir) {
     }
     return chain;
 }
+/**
+ * Walks the path of `root` from the filesystem root, one folder at a time with `lstat`, and
+ * returns every folder on the way (the last one is `root`). Returns null when a folder is
+ * missing. A symlink on the way is `symlinked-parent`; a non-folder is `not-a-folder`.
+ */
+function LocalEdgeKit_walkAncestorsForRead(root) {
+    const parsed = path.parse(root);
+    const entries = [];
+    let current = parsed.root;
+    for (const segment of ["", ...root.slice(parsed.root.length).split(path.sep).filter((part) => part !== "")]) {
+        current = segment === "" ? current : path.join(current, segment);
+        const stats = LocalEdgeKit_lstatOrNull(current);
+        if (stats === null) {
+            return null;
+        }
+        if (stats.isSymbolicLink()) {
+            throw LocalEdgeKit_safeReadError("symlinked-parent", `refusing to read below symlinked folder ${current}; give the real path`);
+        }
+        if (!stats.isDirectory()) {
+            throw LocalEdgeKit_safeReadError("not-a-folder", `${current} is not a folder`);
+        }
+        entries.push({ dir: current, dev: stats.dev, ino: stats.ino, mode: stats.mode, uid: stats.uid });
+    }
+    return entries;
+}
 /** Owner every file and folder read here must have; undefined where the platform has no uids. */
 function LocalEdgeKit_currentUid() {
     return typeof process.getuid === "function" ? process.getuid() : undefined;
@@ -231,12 +257,14 @@ function LocalEdgeKit_readBounded(fd, filePath, maxBytes) {
  * read with the same bound. Error messages name the path and the rule, never file content.
  *
  * @param filePath - File to read; must be inside `options.root`.
- * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB).
+ * @param options - Root the file must stay inside, plus optional `maxBytes` (default 256 KiB) and
+ * `refuseSymlinkedParents`.
  * @returns The file's text, or `null` when the file or a folder on the way does not exist.
  * @throws Error with a `local-edge-kit-safe-read-` code when the file is outside the root
  * (`outside-root`), is a symlink, also one swapped in just before the open (`symlink`), or not a
  * regular file (`not-file`), the root or a folder on the way is not a folder (`not-a-folder`) or
- * is a symlink (`symlink`), a folder or the file changed while it was opened (`changed`), the
+ * is a symlink (`symlink`; with `refuseSymlinkedParents` a symlink in the path of the root or
+ * above it is `symlinked-parent`), a folder or the file changed while it was opened (`changed`), the
  * file or its folder is writable by group or others (`unsafe-mode`) or owned by someone else
  * (`unsafe-owner`), or the file is over the size limit (`too-large`). Any other operating-system
  * error (for example `EACCES`) passes through as it is; it names the path, never the content.
@@ -256,19 +284,33 @@ export function LocalEdgeKit_readFileSafe(filePath, options) {
     const uid = options.uid ?? LocalEdgeKit_currentUid();
     const folderUid = options.folderUid ?? uid;
     let realRoot;
-    try {
-        realRoot = realpathSync(root);
-    }
-    catch (error) {
-        if (error.code === "ENOENT") {
+    let ancestors = [];
+    if (options.refuseSymlinkedParents === true) {
+        const walked = LocalEdgeKit_walkAncestorsForRead(root);
+        if (walked === null) {
             return null;
         }
-        throw error;
+        // The folders above the root are rechecked with the rest of the chain; the root itself is
+        // the first entry of the walk below.
+        ancestors = walked.slice(0, -1);
+        realRoot = root;
     }
-    const chain = LocalEdgeKit_walkDirsForRead(realRoot, path.relative(root, path.dirname(target)));
-    if (chain === null) {
+    else {
+        try {
+            realRoot = realpathSync(root);
+        }
+        catch (error) {
+            if (error.code === "ENOENT") {
+                return null;
+            }
+            throw error;
+        }
+    }
+    const below = LocalEdgeKit_walkDirsForRead(realRoot, path.relative(root, path.dirname(target)));
+    if (below === null) {
         return null;
     }
+    const chain = [...ancestors, ...below];
     const resolved = path.join(chain[chain.length - 1]?.dir ?? realRoot, path.basename(target));
     const existing = LocalEdgeKit_lstatOrNull(resolved);
     if (existing === null) {

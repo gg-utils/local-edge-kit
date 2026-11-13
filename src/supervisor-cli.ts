@@ -224,7 +224,14 @@ function LocalEdgeKit_supervisorUsage(config: LocalEdgeKit_SupervisorConfig): st
   ].join("\n");
 }
 
-/** Health cell of a status row: `not run` for a `check` entry, otherwise ok/fail, or `-` (table) / null (json) when not probed. */
+/**
+ * Health cell of a status row: `not run` for a `check` entry, otherwise ok/fail, or `-` (table) /
+ * null (json) when not probed.
+ *
+ * @param row - The row's inspection state and health probe result (null when not probed).
+ * @param view - `table` for the human table, `json` for `status --json`.
+ * @returns `not run`, `ok` or `fail`; when not probed `-` for the table and null for json.
+ */
 function LocalEdgeKit_healthCell(row: { inspection: { state: string }; health: { healthy: boolean } | null }, view: "table"): string;
 function LocalEdgeKit_healthCell(row: { inspection: { state: string }; health: { healthy: boolean } | null }, view: "json"): string | null;
 function LocalEdgeKit_healthCell(row: { inspection: { state: string }; health: { healthy: boolean } | null }, view: "table" | "json"): string | null {

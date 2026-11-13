@@ -56,13 +56,15 @@ export declare function LocalEdgeKit_messageEnvNames(names: readonly string[]): 
 export declare const LOCAL_EDGE_KIT_COMMAND_LINE_MAX_CHARS = 200;
 /**
  * Bounds an observed process command line for display: control characters (including newlines,
- * tabs and escape bytes) are removed and the text is cut to 200 characters, the last of them `…`
- * when something was cut. Unlike `LocalEdgeKit_messageWord` it keeps the words, because a status
- * row exists to show the command; it is meant for status output, not for error messages. The
- * environment is never read, only the command line the process list prints.
+ * tabs and escape bytes), bidirectional and other invisible format characters (Unicode category
+ * Cf: for example U+202A-U+202E, U+2066-U+2069, U+200B-U+200F, U+FEFF) and the line and paragraph
+ * separators U+2028 and U+2029 are removed, and the text is cut to 200 characters, the last of
+ * them `…` when something was cut. Unlike `LocalEdgeKit_messageWord` it keeps the words, because a
+ * status row exists to show the command; it is meant for status output, not for error messages.
+ * It only edits the command line text it is given; it reads no process environment.
  *
  * @param value - The command line as the process list printed it.
- * @returns Text of at most 200 characters without control characters.
+ * @returns Text of at most 200 characters without control or format characters.
  *
  * @example
  * ```typescript

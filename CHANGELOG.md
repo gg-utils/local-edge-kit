@@ -18,24 +18,36 @@ First slice of a local runner: the catalog entry gets a kind, and `status` gets 
 - **Read-only pid and log files outside `cwd` for `external` entries.** They may name an absolute
   `pidFile` and `logFile` anywhere (a relative path is a config problem). They are only read,
   through `LocalEdgeKit_readFileSafe` via the new `readExternalText` member of
-  `LocalEdgeKit_SupervisorHost`; never written, never signalled. `status` shows the pid observed in
-  the pid file, with its process group, command line and start time. `logs <external app>` prints
-  the last lines of the log (up to 8 MiB; `-f` is refused). `run` entries keep the inside-`cwd`
-  rule and never use this path.
+  `LocalEdgeKit_SupervisorHost`; never written, never signalled. No symlink is followed: the file,
+  its folder and every folder above it must be real (a symlinked parent is refused with
+  `local-edge-kit-safe-read-symlinked-parent`; on macOS give `/private/var/...`, not `/var/...`).
+  `status` shows the pid observed in the pid file, with its process group, command line and start
+  time. The pid is looked up in the process list without reading that process's environment (no
+  `ps -E`, no `/proc/<pid>/environ`), so an observed pid has no launch id and its identity is uid,
+  start time and command line. `logs <external app>` prints the last lines of the log (up to
+  8 MiB; a larger log is refused, not truncated; `-f` is refused). `run` entries keep the
+  inside-`cwd` rule and never use this path.
 - **New status fields** for every kind, in `status --json` rows: `kind`, `processGroup`,
-  `commandLine` (the observed pid's command line from the process list, control characters removed,
-  at most 200 characters; the environment is never read), `cwd` as configured, `envFile` (path
+  `commandLine` (the observed pid's command line from the process list; control characters, bidi
+  and other format characters removed, at most 200 characters), `cwd` as configured, `envFile` (path
   only) with `envFilePresent` (checked without opening the file), `since` (ISO time of the observed
   process start) and `restarts` (always `0`; the runner sets the counter later), plus `healthStatus`.
   The human table adds `KIND`, `PGID`, `SINCE` and `RESTARTS` after `EDGE-STATE`; the long fields
   (command line, cwd, env file) are only in `--json`. There is no `--wide` view.
-- **Breaking for custom hosts.** `LocalEdgeKit_SupervisorHost` has a new required member
-  `readExternalText(filePath, options?)`; `LocalEdgeKit_createSupervisorHost()` provides it.
+- **Breaking for custom hosts and typed consumers.** `LocalEdgeKit_SupervisorHost` has a new
+  required member `readExternalText(filePath, options?)`; `LocalEdgeKit_createSupervisorHost()`
+  provides it. Its `processIdentity(pid, options?)` takes an optional `{ readLaunchId }` (a custom
+  host that ignores it keeps reading the environment for external pids).
   `LocalEdgeKit_SupervisedAppInspection` gains `observed` and `restarts`, and
-  `LocalEdgeKit_SupervisedAppState` gains `"check"`.
+  `LocalEdgeKit_SupervisedAppState` gains `"check"`. On the exported type
+  `LocalEdgeKit_SupervisedApp`, `localPort` and `healthPath` became optional (they were required);
+  code that reads them as required stops compiling until it handles `undefined`.
 - **`since` is parsed strictly.** The process list's start time (`Thu Nov 12 03:47:37 2026`, local
   time) is converted only when it has exactly that shape and is a real date; anything else gives
   `null`.
+- **Library additions.** `LocalEdgeKit_readProcessIdentity(pid, { readLaunchId: false })` skips the
+  process environment; `LocalEdgeKit_readFileSafe` takes `refuseSymlinkedParents`, which refuses a
+  symlink anywhere in the path of its root (`local-edge-kit-safe-read-symlinked-parent`).
 - **README:** new section "Catalog kinds and status fields". Examples point at `#v0.6.0`.
 
 ## 0.5.1 - 2026-11-12

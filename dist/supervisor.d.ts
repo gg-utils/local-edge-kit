@@ -152,7 +152,8 @@ export type LocalEdgeKit_SupervisedAppInspection = {
     /**
      * The live identity (command line and start time) of `pid`, read from the process list, when
      * the process is alive and is the recorded one, is an unverified pid, or is an external entry's
-     * observed pid. Null otherwise. Never includes the environment.
+     * observed pid. Null otherwise. For an external entry's pid it is read without the process
+     * environment (no launch id). Its `command` and `startedAt` are what status shows.
      */
     observed: LocalEdgeKit_ProcessIdentity | null;
     /** Times the runner restarted the app. Always 0 in this release; the runner sets it later. */
@@ -174,8 +175,9 @@ export type LocalEdgeKit_SupervisorHost = {
     readText(filePath: string): string | null;
     /**
      * Reads a file that may live anywhere (an external entry's pid or log file) through
-     * `LocalEdgeKit_readFileSafe`: no symlinks, owned by you and not writable by group or others,
-     * in such a folder, size-bounded. Returns null when the file does not exist and throws the
+     * `LocalEdgeKit_readFileSafe`: no symlink in the file or in any folder of its path (a symlinked
+     * parent is `local-edge-kit-safe-read-symlinked-parent`), owned by you and not writable by
+     * group or others, in such a folder, size-bounded. Returns null when the file does not exist and throws the
      * helper's named error otherwise. Never writes.
      */
     readExternalText(filePath: string, options?: {
@@ -211,7 +213,13 @@ export type LocalEdgeKit_SupervisorHost = {
     fileSize(filePath: string): number;
     pidIsAlive(pid: number): boolean;
     /** Owner uid, start time and command line of a live process, or null when it is gone. */
-    processIdentity(pid: number): LocalEdgeKit_ProcessIdentity | null;
+    /**
+     * Reads a live process's identity. `readLaunchId: false` skips the process environment (used
+     * for pids the supervisor did not start); the default reads it for the launch id.
+     */
+    processIdentity(pid: number, options?: {
+        readLaunchId?: boolean | undefined;
+    }): LocalEdgeKit_ProcessIdentity | null;
     /** The supervisor's own pid (lock owner). */
     ownPid(): number;
     processGroupOf(pid: number): number | null;
@@ -405,7 +413,8 @@ export type LocalEdgeKit_SupervisedAppStatusFields = {
 };
 /**
  * Builds the status fields of one entry from its inspection. Read-only: the env file is checked
- * for existence only, and the process environment is never read.
+ * for existence only (it is not opened), and this function reads no process environment. No
+ * environment value of any process is ever part of the fields.
  *
  * @param app - The app.
  * @param inspection - Its inspection (`pid`, `processGroup`, `observed` and `restarts` are used).

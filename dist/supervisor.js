@@ -90,7 +90,7 @@ export function LocalEdgeKit_createSupervisorHost() {
     };
     return {
         readText: (filePath) => (existsSync(filePath) ? readFileSync(filePath, "utf8") : null),
-        readExternalText: (filePath, options) => LocalEdgeKit_readFileSafe(filePath, { root: path.dirname(filePath), ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }),
+        readExternalText: (filePath, options) => LocalEdgeKit_readFileSafe(filePath, { root: path.dirname(filePath), refuseSymlinkedParents: true, ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }) }),
         writeText: (filePath, text, options) => LocalEdgeKit_writeFileAtomic(filePath, text, options),
         createExclusive: (filePath, text, options) => LocalEdgeKit_createFileExclusive(filePath, text, options),
         ensureDir: (dirPath, options) => {
@@ -127,7 +127,7 @@ export function LocalEdgeKit_createSupervisorHost() {
                 return error.code === "EPERM";
             }
         },
-        processIdentity: (pid) => LocalEdgeKit_readProcessIdentity(pid),
+        processIdentity: (pid, options) => LocalEdgeKit_readProcessIdentity(pid, options),
         ownPid: () => process.pid,
         processGroupOf,
         parentOf: (pid) => {
@@ -426,7 +426,14 @@ export function LocalEdgeKit_readPidFile(host, filePath) {
 }
 /**
  * Reads an external entry's pid file (read-only, through the host's safe read) and looks the pid
- * up in the process list. Never signals, never writes, never reads the process environment.
+ * up in the process list. Never signals and never writes. The pid was not started by the
+ * supervisor, so its identity is uid, start time and command line only: the lookup passes
+ * `readLaunchId: false`, and the process environment is not read.
+ *
+ * @param app - The external app.
+ * @param host - Supervisor host (`readExternalText`, `processIdentity`, `processGroupOf`).
+ * @returns The pid, the live identity and process group (null when none), and a note naming
+ * what was found or the refusal code, never a path or file content.
  */
 function LocalEdgeKit_observeExternalPid(app, host) {
     const none = { pid: null, observed: null, processGroup: null };
@@ -451,7 +458,7 @@ function LocalEdgeKit_observeExternalPid(app, host) {
     if (pid === null) {
         return { ...none, note: "pid file holds no pid" };
     }
-    const observed = host.processIdentity(pid);
+    const observed = host.processIdentity(pid, { readLaunchId: false });
     if (observed === null) {
         return { ...none, note: `pid file names pid ${String(pid)}, which is not running` };
     }
@@ -535,6 +542,9 @@ const LOCAL_EDGE_KIT_PS_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul
  * Converts a start time as `ps -o lstart=` prints it in the C locale (`Thu Nov 12 03:47:37 2026`,
  * local time) to an ISO UTC time. Strict: anything that is not exactly that shape, or not a real
  * date, gives null (a lenient parser would read `start-701` as the year 701).
+ *
+ * @param startedAt - The start time as the process list printed it.
+ * @returns The ISO UTC time, or null when the text is not exactly that shape or not a real date.
  */
 function LocalEdgeKit_isoFromPsStartTime(startedAt) {
     const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(startedAt);
@@ -549,7 +559,8 @@ function LocalEdgeKit_isoFromPsStartTime(startedAt) {
 }
 /**
  * Builds the status fields of one entry from its inspection. Read-only: the env file is checked
- * for existence only, and the process environment is never read.
+ * for existence only (it is not opened), and this function reads no process environment. No
+ * environment value of any process is ever part of the fields.
  *
  * @param app - The app.
  * @param inspection - Its inspection (`pid`, `processGroup`, `observed` and `restarts` are used).
