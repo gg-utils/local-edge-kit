@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 - 2026-11-13
+
+Fixes from the first consumer of 0.6.0, and the core pin moves to `v0.5.0`.
+
+- **Core is pinned to `v0.5.0`.** The router config core renders now sets `X-Forwarded-For` and
+  `X-Real-IP` to one value, adds `X-Real-Port`, clears client-sent `Forwarded`, `X-Client-IP` and
+  `True-Client-IP`, and writes an access log with no addresses or query strings. The new
+  `exposure.hostnames` settings `clientAddress` (`"connection"` by default, or `"proxy-protocol"`
+  with `proxyProtocol` ports) and `nginx.errorLogLevel` pass through unchanged; see the core
+  CHANGELOG for 0.5.0. A project that relied on the appended `X-Forwarded-For` or the old access
+  log format sees a change when its router config is next rendered.
 
 - **Fix:** `since` was `null` for a process that started on day 1-9 of a month: `ps -o lstart`
   pads a single-digit day with two spaces (`Fri Nov  6 08:01:02 2026`) and the strict parser wanted
