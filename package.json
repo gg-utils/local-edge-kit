@@ -1,6 +1,6 @@
 {
   "name": "@gg-utils/local-edge-kit",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Reusable local-edge command kit for project-owned local-edge.config.ts adapters.",
   "license": "MIT",
   "type": "module",

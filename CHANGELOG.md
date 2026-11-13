@@ -1,17 +1,18 @@
 # Changelog
 
-## Unreleased (0.6.3)
+## 0.6.3 - 2026-11-13
 
 A fix for `down`: a stop that worked is no longer reported as failed.
 
 - **Fix:** `down` of a `run` app could print "All PIDs terminated gracefully", then return
   `failed` / `process survived SIGKILL` and keep the pid file, while the recorded pid and its group were
-  gone a second later. A leader that has just exited can still be listed by `ps` for a moment, as a
-  zombie or while exiting, with the same uid, start time and command, so the one identity check after
-  the signals took it for a survivor. Now:
+  gone a second later. A leader that has just exited can still be listed by `ps` for a moment, and the
+  one identity check right after the signals took it for a survivor. The bounded re-check below is
+  what fixes the observed case. Now:
   - the identity read also reads the `ps` process state (still one `ps` call) and treats a state that
     starts with `Z` (zombie) as gone. `LocalEdgeKit_parsePsIdentityLine` accepts the optional state
-    column and returns null for a zombie.
+    column and returns null for a zombie. This matters only where `ps` keeps a zombie's command;
+    on macOS `ps` shows a zombie's command as `<defunct>`, which already fails the identity match.
   - after the signals, `down` checks the identity again for up to 1 second, in 50 ms steps, before it
     reports a survivor. The wait uses the host's clock and sleep, and is skipped when the process is
     already gone. A process that really stays still gives `failed` / `process survived SIGKILL` and
