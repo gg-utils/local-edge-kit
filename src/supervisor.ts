@@ -295,6 +295,9 @@ export type LocalEdgeKit_SupervisorStepResult = {
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_START_TIMEOUT_MS = 60_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS = 10_000;
 const LOCAL_EDGE_KIT_SUPERVISOR_POLL_MS = 500;
+/** After a stop, how long a leader that is still exiting may stay listed before it counts as a survivor. */
+const LOCAL_EDGE_KIT_SUPERVISOR_EXIT_SETTLE_MS = 1000;
+const LOCAL_EDGE_KIT_SUPERVISOR_EXIT_SETTLE_STEP_MS = 50;
 
 /** Child script for `fetchUnixSocketText`: one GET over a unix socket, body on stdout, exit 0 on 200. */
 const LOCAL_EDGE_KIT_UNIX_SOCKET_FETCH_SCRIPT = [
@@ -1457,7 +1460,14 @@ function LocalEdgeKit_stopLocked(
     timeoutMs: app.stopTimeoutMs ?? LOCAL_EDGE_KIT_SUPERVISOR_DEFAULT_STOP_TIMEOUT_MS,
     out,
   });
-  const stillOurs = LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
+  const isOurs = (): boolean => LocalEdgeKit_verifyProcessIdentity({ pid, recorded: identity, current: host.processIdentity(pid) }).ok;
+  // A leader that has just exited can stay listed for a moment; look again, bounded, before calling it a survivor.
+  const settleDeadline = host.now() + LOCAL_EDGE_KIT_SUPERVISOR_EXIT_SETTLE_MS;
+  let stillOurs = isOurs();
+  while (stillOurs && host.now() < settleDeadline) {
+    host.sleepSync(LOCAL_EDGE_KIT_SUPERVISOR_EXIT_SETTLE_STEP_MS);
+    stillOurs = isOurs();
+  }
   if (!stillOurs) {
     host.removeFile(pidFile);
   }

@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fakeHost, fakePidFile } from "./supervisor-fake-host.unit.test.js";
+import { fakeHost, fakeIdentity, fakePidFile } from "./supervisor-fake-host.unit.test.js";
 import {
   type LocalEdgeKit_SupervisedApp,
   LocalEdgeKit_inspectSupervisedApp,
@@ -243,6 +243,39 @@ void test("down escalates to SIGKILL when TERM is ignored", () => {
   const results = LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: patched, out });
   assert.equal(results[0]?.action, "stopped");
   assert.deepEqual(host.signals.map((s) => s.signal), ["SIGTERM", "SIGKILL"]);
+});
+
+function ghostStopFixture(options: { ghostMs: number }) {
+  const host = fakeHost({ files: { "/w/auth/.local/edge.pid": fakePidFile(600) }, processes: [{ pid: 600, group: 600, port: 4300 }] });
+  const patched = { ...host };
+  let killedAt: number | null = null;
+  patched.kill = (pid, signal) => {
+    host.kill(pid, signal);
+    if (signal === "SIGTERM" && killedAt === null) {
+      killedAt = host.now();
+    }
+  };
+  // The leader has exited, but `ps` still lists it with the recorded uid, start time and command for a while.
+  patched.processIdentity = (pid, readOptions) =>
+    pid === 600 && killedAt !== null && host.now() < killedAt + options.ghostMs ? fakeIdentity(600) : host.processIdentity(pid, readOptions);
+  const auth = apps().filter((a) => a.id === "auth").map((a) => ({ ...a, stopTimeoutMs: 1000 }));
+  const results = LocalEdgeKit_supervisorDown({ apps: auth, requestedIds: ["auth"], host: patched, out });
+  return { host, results };
+}
+
+void test("down does not report a survivor while the leader is still listed for a moment after the kill", () => {
+  const { host, results } = ghostStopFixture({ ghostMs: 300 });
+  assert.equal(results[0]?.action, "stopped");
+  assert.equal(results[0]?.ok, true);
+  assert.equal(host.files.has("/w/auth/.local/edge.pid"), false);
+});
+
+void test("down still reports process survived SIGKILL and keeps the pid file when the process stays", () => {
+  const { host, results } = ghostStopFixture({ ghostMs: 60_000 });
+  assert.equal(results[0]?.action, "failed");
+  assert.equal(results[0]?.ok, false);
+  assert.equal(results[0]?.message, "process survived SIGKILL");
+  assert.equal(host.files.has("/w/auth/.local/edge.pid"), true);
 });
 
 void test("launch env goes to the started process, counts for required names and prints names only", async () => {

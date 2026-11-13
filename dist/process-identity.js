@@ -18,7 +18,9 @@
  * a process that exits while a stop is in progress cannot pass its pid on to a new process that
  * then receives the next signal. A narrow window remains between that last check and the
  * `kill` system call itself; POSIX offers no pid handle to close it from Node.
- * Uid, start time and command line come from one `ps` call; the environment is read after it,
+ * A process that has exited but is still listed (a zombie, `ps` state `Z`) is gone for this check:
+ * the read returns null, so a leader that has just exited is not mistaken for a survivor.
+ * Uid, state, start time and command line come from one `ps` call; the environment is read after it,
  * and only when the caller asks for the launch id (`readLaunchId`, the default). A pid the
  * supervisor did not start (an observed external pid) is read with `readLaunchId: false`: its
  * identity is uid, start time and command line, with no launch id, and its environment is not
@@ -102,30 +104,36 @@ function LocalEdgeKit_readLaunchId(pid) {
     return listing === null ? undefined : (LocalEdgeKit_launchIdFromEnvironment(listing) ?? undefined);
 }
 /**
- * Parses one `ps -o uid=,lstart=,command=` line.
+ * Parses one `ps -o uid=,stat=,lstart=,command=` line. The `stat` column is optional, so a
+ * `uid=,lstart=,command=` line still parses.
  *
  * @param line - The line.
- * @returns The fields, or null when the line does not have that shape.
+ * @returns The fields, or null when the line does not have that shape or its process state
+ * starts with `Z` (a zombie: it has exited and only waits to be reaped).
  * @example
  * ```typescript
- * LocalEdgeKit_parsePsIdentityLine("  501 Thu Nov 12 03:47:37 2026     pnpm dev");
+ * LocalEdgeKit_parsePsIdentityLine("  501 Ss   Thu Nov 12 03:47:37 2026     pnpm dev");
  * ```
  */
 export function LocalEdgeKit_parsePsIdentityLine(line) {
-    const match = /^\s*(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(\S.*?)\s*$/.exec(line);
-    if (!match?.[1] || !match[2] || !match[3]) {
+    const match = /^\s*(\d+)\s+(?:([A-Za-z][^\s]*)\s+)?([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(\S.*?)\s*$/.exec(line);
+    if (!match?.[1] || !match[3] || !match[4]) {
         return null;
     }
-    return { uid: Number(match[1]), startedAt: match[2].replace(/\s+/g, " "), command: match[3] };
+    if (match[2]?.startsWith("Z") === true) {
+        return null;
+    }
+    return { uid: Number(match[1]), startedAt: match[3].replace(/\s+/g, " "), command: match[4] };
 }
 /**
- * Reads a live process's identity: uid, start time and command line from one `ps` call, then
+ * Reads a live process's identity: uid, start time and command line from one `ps` call (which
+ * also reads the process state, so a zombie counts as gone), then
  * (unless `readLaunchId` is false) the launch id from its environment.
  *
  * @param pid - Process id.
  * @param options - `readLaunchId` (default true). With false the process environment is not
  * read (no `ps -E`, no `/proc/<pid>/environ`) and the identity has no `launchId`.
- * @returns The identity, or null when the process does not exist or `ps` cannot read it.
+ * @returns The identity, or null when the process does not exist, is a zombie, or `ps` cannot read it.
  * @example
  * ```typescript
  * LocalEdgeKit_readProcessIdentity(process.pid); // { uid: 501, startedAt: "Thu Nov 12 03:47:37 2026", command: "node ..." }
@@ -135,7 +143,7 @@ export function LocalEdgeKit_readProcessIdentity(pid, options = {}) {
     if (!Number.isInteger(pid) || pid <= 0) {
         return null;
     }
-    const line = LocalEdgeKit_ps(["-o", "uid=,lstart=,command=", "-p", String(pid)]);
+    const line = LocalEdgeKit_ps(["-o", "uid=,stat=,lstart=,command=", "-p", String(pid)]);
     const fields = line === null ? null : LocalEdgeKit_parsePsIdentityLine(line);
     if (fields === null) {
         return null;

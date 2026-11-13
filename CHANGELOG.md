@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased (0.6.3)
+
+A fix for `down`: a stop that worked is no longer reported as failed.
+
+- **Fix:** `down` of a `run` app could print "All PIDs terminated gracefully", then return
+  `failed` / `process survived SIGKILL` and keep the pid file, while the recorded pid and its group were
+  gone a second later. A leader that has just exited can still be listed by `ps` for a moment, as a
+  zombie or while exiting, with the same uid, start time and command, so the one identity check after
+  the signals took it for a survivor. Now:
+  - the identity read also reads the `ps` process state (still one `ps` call) and treats a state that
+    starts with `Z` (zombie) as gone. `LocalEdgeKit_parsePsIdentityLine` accepts the optional state
+    column and returns null for a zombie.
+  - after the signals, `down` checks the identity again for up to 1 second, in 50 ms steps, before it
+    reports a survivor. The wait uses the host's clock and sleep, and is skipped when the process is
+    already gone. A process that really stays still gives `failed` / `process survived SIGKILL` and
+    keeps its pid file. The router stop already waited until the process was gone, so only the zombie
+    change applies to it.
+- **Test:** a zombie `ps` line is gone; a stop where the leader stays listed for a moment after the kill
+  gives `stopped` and removes the pid file; a process that stays gives `failed` and keeps it.
+
 ## 0.6.2 - 2026-11-13
 
 A fix for the health probe: the paths it requests stay on `127.0.0.1:<localPort>`.
