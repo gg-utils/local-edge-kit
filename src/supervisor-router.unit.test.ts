@@ -1001,3 +1001,30 @@ void test("down returns the failure instead of throwing when a host call throws 
   assert.deepEqual(result.errors, ["stopping the router failed: ps broke"]);
   assert.deepEqual(host.signals, [{ pid: 500, signal: "SIGQUIT" }]);
 });
+
+void test("clientAddress, proxyProtocol, stream and nginx.errorLogLevel set in the supervisor config reach the core render written by up", async () => {
+  const proxied: LocalEdgeKit_SupervisorConfig = {
+    ...hostConfig,
+    exposure: {
+      ...hostConfig.exposure,
+      hostnames: {
+        ...hostnames,
+        stream: { port: 8463, routes: [{ serverName: "~\\.example\\.test$", upstream: "127.0.0.1:8460" }], defaultUpstream: "192.0.2.10:443" },
+        clientAddress: "proxy-protocol",
+        proxyProtocol: { streamPort: 8464, httpPort: 8465, relayPort: 8466 },
+        nginx: { ...hostnames.nginx, errorLogLevel: "error" },
+      },
+    },
+  };
+  const host = nginxHost({ files: { ...certFiles } });
+  const err = capture();
+  assert.equal(await LocalEdgeKit_runSupervisorCli({ args: ["up", "router"], config: proxied, host, stdout: capture().writer, stderr: err.writer }), 0, err.text());
+  const text = host.files.get("/st/nginx/nginx.conf") ?? "";
+  assert.match(text, /listen 127\.0\.0\.1:8463;/u, "the stream listener");
+  assert.match(text, /listen 127\.0\.0\.1:8465 ssl proxy_protocol;|listen 127\.0\.0\.1:8465[^;]*proxy_protocol/u, "the proxy_protocol http listener");
+  assert.match(text, /error_log \/st\/logs\/nginx-error\.log error;/u, "the error log level");
+  // Without the three settings none of them appears, so the assertions above are not satisfied by the default render.
+  const plain = await renderedConfig();
+  assert.doesNotMatch(plain, /8463|8465|listen [^;]*proxy_protocol/u);
+  assert.match(plain, /error_log \/st\/logs\/nginx-error\.log warn;/u);
+});

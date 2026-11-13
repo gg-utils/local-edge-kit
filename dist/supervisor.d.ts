@@ -102,9 +102,16 @@ export type LocalEdgeKit_SupervisedApp = {
     proxy?: LocalEdgeKit_SupervisedAppProxy | undefined;
     /** Where the app was declared, shown by `status`. Default `project`. */
     source?: string | undefined;
-    /** HTTP path that must answer 2xx/3xx for the app to count as healthy. Required except for `check` entries. */
+    /**
+     * HTTP path that must answer 2xx/3xx for the app to count as healthy. Required except for
+     * `check` entries. A plain path on loopback: one leading `/`, then no `//` prefix, `@`,
+     * backslash or control character (see `LocalEdgeKit_isLoopbackProbePath`).
+     */
     healthPath?: string | undefined;
-    /** Optional second HTTP path that must answer before the app counts as ready. */
+    /**
+     * Optional second HTTP path that must answer before the app counts as ready. Same shape rule
+     * as `healthPath`. An empty string counts as not set.
+     */
     readyPath?: string | undefined;
     /** Optional text that must appear in the log after start before the app counts as ready. */
     readyLogLine?: string | undefined;
@@ -299,12 +306,43 @@ export declare function LocalEdgeKit_resolveAppPath(app: LocalEdgeKit_Supervised
  */
 export declare function LocalEdgeKit_resolveAppKind(app: LocalEdgeKit_SupervisedApp): LocalEdgeKit_SupervisedAppKind;
 /**
+ * Whether a probe path is a plain path that can only mean a path on the loopback port: it starts
+ * with exactly one `/` (so no scheme and no `//` host form) and has no `@`, backslash or control
+ * character (the URL parser would read `@host` as a host and a backslash as `/`, and strips tabs
+ * and newlines). Query and fragment text is allowed.
+ *
+ * @param value - The configured `healthPath` or `readyPath`.
+ * @returns True when the path has that shape.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_isLoopbackProbePath("/healthz?full=1"); // true
+ * LocalEdgeKit_isLoopbackProbePath("@host.example/x"); // false
+ * ```
+ */
+export declare function LocalEdgeKit_isLoopbackProbePath(value: string): boolean;
+/**
+ * Builds the probe URL of one path on `127.0.0.1:<port>` with the URL parser and checks the
+ * result: the host must be exactly `127.0.0.1`, the port must be the app's port, the scheme must
+ * be `http:` and there must be no user-info. Never throws.
+ *
+ * @param port - The app's local port.
+ * @param probePath - The configured path.
+ * @returns The URL text, or null when the path would leave `127.0.0.1:<port>` or is not a URL.
+ * @example
+ * ```typescript
+ * LocalEdgeKit_loopbackProbeUrl(3100, "/healthz"); // "http://127.0.0.1:3100/healthz"
+ * LocalEdgeKit_loopbackProbeUrl(3100, "@host.example/x"); // null
+ * ```
+ */
+export declare function LocalEdgeKit_loopbackProbeUrl(port: number, probePath: string): string | null;
+/**
  * Validates supervisor apps: unique ids, a known and consistent kind, required fields per kind,
  * unique local ports, known dependencies, enabled apps depending only on enabled apps, and no
  * cycles. `run` entries (enabled) need `cwd`, `command`, `pidFile` and `logFile`; `external`
  * entries may not set `command` and may name `pidFile` and `logFile` only as absolute paths;
  * `check` entries (enabled) need `cwd` and `command`, and are the only kind without a port or
- * health path.
+ * health path. `healthPath` and a set `readyPath` must be plain loopback paths
+ * (`LocalEdgeKit_isLoopbackProbePath`); the error never repeats the value.
  *
  * @param apps - All configured apps.
  * @returns One line per problem; an empty list means valid. Never throws.
@@ -428,7 +466,9 @@ export type LocalEdgeKit_SupervisedAppStatusFields = {
  */
 export declare function LocalEdgeKit_supervisedAppStatusFields(app: LocalEdgeKit_SupervisedApp, inspection: LocalEdgeKit_SupervisedAppInspection, host: LocalEdgeKit_SupervisorHost): LocalEdgeKit_SupervisedAppStatusFields;
 /**
- * Probes an app's health path (and ready path, when set) on `127.0.0.1`.
+ * Probes an app's health path (and ready path, when set) on `127.0.0.1`. The URL is built with the
+ * URL parser and refused unless its host is exactly `127.0.0.1` and its port is the app's port; a
+ * refused path is not fetched and counts as failed (`status` null, `path` shown without its value).
  *
  * @param app - The app.
  * @param host - Supervisor host (HTTP through `host.httpStatus`).

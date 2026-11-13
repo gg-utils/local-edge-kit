@@ -31,6 +31,9 @@ import {
   type LocalEdgeKit_SupervisedApp,
   LocalEdgeKit_createSupervisorHost,
   LocalEdgeKit_inspectSupervisedApp,
+  LocalEdgeKit_isLoopbackProbePath,
+  LocalEdgeKit_loopbackProbeUrl,
+  LocalEdgeKit_probeSupervisedAppHealth,
   LocalEdgeKit_resolveAppKind,
   LocalEdgeKit_supervisedAppStatusFields,
   LocalEdgeKit_supervisorDown,
@@ -119,6 +122,122 @@ void test("a check entry needs cwd and command but no port or health path; the o
   assert.match(LocalEdgeKit_validateSupervisedApps([{ ...externalApp, localPort: undefined }]).join("\n"), /lane: external apps need localPort/u);
   assert.match(LocalEdgeKit_validateSupervisedApps([{ ...runApp, healthPath: undefined }]).join("\n"), /web: healthPath must start with \//u);
   assert.match(LocalEdgeKit_validateSupervisedApps([runApp, { ...runApp, id: "b" }]).join("\n"), /b: local port 3210 is also used by web/u);
+});
+
+/** Probe paths that are not plain loopback paths. Each carries a marker so an echo in a message is found. */
+const BAD_PROBE_PATHS: readonly string[] = [
+  "@PATHMARK1.example/x", // user-info form: starts without `/`
+  "PATHMARK2.example/x", // no leading slash
+  "http://PATHMARK3.example/x", // a scheme
+  "https:PATHMARK4", // a scheme without slashes
+  "//PATHMARK5.example/x", // protocol-relative host
+  "//PATHMARK18.example:3100/x", // another host on the app's own port
+  "/@PATHMARK6.example/x", // `@` after the slash
+  "/x/PATHMARK7@example/y",
+  "/\\PATHMARK8.example", // backslash right after the slash
+  "/a\\PATHMARK9",
+  "\\PATHMARK10.example\\x", // starts with a backslash
+  "/a\tPATHMARK11", // tab
+  "/a\nPATHMARK12", // newline
+  "/a\rPATHMARK13", // carriage return
+  "/a\u0000PATHMARK14", // NUL
+  "/a\u001bPATHMARK15", // escape
+  "/a\u007fPATHMARK16", // DEL
+  "/a\u0085PATHMARK17", // C1 control
+  "",
+];
+
+/** Probe paths that stay valid, including query text and punctuation. */
+const GOOD_PROBE_PATHS: readonly string[] = ["/", "/healthz", "/api/v1/ready", "/health?full=1", "/a:b", "/a/./b", "/a%2Fb", "/health#top"];
+
+void test("healthPath and readyPath each refuse a path that is not a plain loopback path, with a named error that never repeats the value", () => {
+  for (const field of ["healthPath", "readyPath"] as const) {
+    for (const bad of BAD_PROBE_PATHS) {
+      if (field === "readyPath" && bad === "") {
+        continue; // an empty readyPath counts as not set, as the probe treats it
+      }
+      const problems = LocalEdgeKit_validateSupervisedApps([{ ...runApp, [field]: bad }]);
+      const text = problems.join("\n");
+      assert.equal(problems.length, 1, `${field} ${JSON.stringify(bad)}: ${text}`);
+      assert.match(text, new RegExp(`^(local-edge-kit-probe-path-invalid: web: ${field} must be a plain path on loopback|web: ${field} must start with /)`, "u"), `${field} ${JSON.stringify(bad)}`);
+      assert.ok(!/PATHMARK/u.test(text), `${field} ${JSON.stringify(bad)} was repeated: ${text}`);
+    }
+    for (const good of GOOD_PROBE_PATHS) {
+      assert.deepEqual(LocalEdgeKit_validateSupervisedApps([{ ...runApp, [field]: good }]), [], `${field} ${good}`);
+    }
+  }
+  // A path that starts with `/` but has the wrong shape gets the named error; one without `/` keeps the old message.
+  assert.match(LocalEdgeKit_validateSupervisedApps([{ ...runApp, readyPath: "//PATHMARK5.example/x" }])[0] ?? "", /^local-edge-kit-probe-path-invalid: web: readyPath /u);
+  assert.match(LocalEdgeKit_validateSupervisedApps([{ ...runApp, readyPath: "@PATHMARK1.example/x" }])[0] ?? "", /^web: readyPath must start with \//u);
+  assert.match(LocalEdgeKit_validateSupervisedApps([{ ...runApp, healthPath: "/@PATHMARK6.example/x" }])[0] ?? "", /^local-edge-kit-probe-path-invalid: web: healthPath /u);
+});
+
+void test("an unset or empty readyPath is accepted, and a bad one is refused on an external entry and a disabled entry too", () => {
+  assert.deepEqual(LocalEdgeKit_validateSupervisedApps([{ ...runApp, readyPath: undefined }, { ...externalApp, readyPath: "" }]), []);
+  assert.equal(LocalEdgeKit_validateSupervisedApps([{ ...externalApp, readyPath: "@PATHMARK1.example/x" }]).length, 1);
+  assert.equal(LocalEdgeKit_validateSupervisedApps([{ ...runApp, enabled: false, readyPath: "//PATHMARK5.example/x" }]).length, 1);
+});
+
+void test("the path shape check: one leading slash and no at sign, backslash or control character", () => {
+  for (const good of GOOD_PROBE_PATHS) {
+    assert.equal(LocalEdgeKit_isLoopbackProbePath(good), true, good);
+  }
+  for (const bad of BAD_PROBE_PATHS) {
+    assert.equal(LocalEdgeKit_isLoopbackProbePath(bad), false, JSON.stringify(bad));
+  }
+});
+
+void test("the probe URL is built with the URL parser and refused unless the host is exactly 127.0.0.1 and the port is the app's", () => {
+  assert.equal(LocalEdgeKit_loopbackProbeUrl(3100, "/"), "http://127.0.0.1:3100/");
+  assert.equal(LocalEdgeKit_loopbackProbeUrl(3100, "/healthz?full=1"), "http://127.0.0.1:3100/healthz?full=1");
+  assert.equal(LocalEdgeKit_loopbackProbeUrl(80, "/x"), "http://127.0.0.1/x", "port 80 is the scheme default");
+  for (const off of [
+    "http://PATHMARK3.example/x", // an absolute URL replaces the base
+    "https://127.0.0.1:3100/x", // another scheme
+    "//PATHMARK5.example/x", // protocol-relative
+    "//127.0.0.1:9999/x", // the loopback host but another port
+    "//127.0.0.2:3100/x", // another loopback address
+    "//localhost:3100/x", // another name for it
+    "//PATHMARK18.example:3100/x", // another host with the app's own port
+    "//user@127.0.0.1:3100/x", // user-info
+    "//user:pass@127.0.0.1:3100/x",
+    "\\\\PATHMARK8.example\\x", // backslashes are slashes for http
+    "http:\\\\PATHMARK8.example\\x",
+    "HTTP://PATHMARK3.example/x",
+    "http://[::1]:3100/x",
+  ]) {
+    assert.equal(LocalEdgeKit_loopbackProbeUrl(3100, off), null, JSON.stringify(off));
+  }
+  // A relative form that has no host to change stays under the loopback origin.
+  assert.equal(LocalEdgeKit_loopbackProbeUrl(3100, "@PATHMARK1.example/x"), "http://127.0.0.1:3100/@PATHMARK1.example/x");
+});
+
+void test("the probe never fetches off loopback: a bad healthPath or readyPath is refused without a request and counts as failed", async () => {
+  for (const field of ["healthPath", "readyPath"] as const) {
+    for (const bad of BAD_PROBE_PATHS) {
+      const urls: string[] = [];
+      const host = fakeHost({ healthy: (url) => (urls.push(url), 200) });
+      const app = { ...externalApp, healthPath: "/", readyPath: undefined, [field]: bad } as LocalEdgeKit_SupervisedApp;
+      const result = await LocalEdgeKit_probeSupervisedAppHealth(app, host);
+      for (const url of urls) {
+        const parsed = new URL(url);
+        assert.equal(`${parsed.protocol}//${parsed.username}${parsed.password}${parsed.hostname}:${parsed.port}`, "http://127.0.0.1:3100", `${field} ${JSON.stringify(bad)} fetched ${url}`);
+      }
+      // The fake host answers 200 to everything it is asked, so a null status is a refusal: its path is not repeated.
+      for (const check of result.checks.filter((item) => item.status === null)) {
+        assert.ok(!check.path.includes("PATHMARK"), `${field} ${JSON.stringify(bad)} was repeated: ${JSON.stringify(result)}`);
+      }
+    }
+  }
+  const urls: string[] = [];
+  const host = fakeHost({ healthy: (url) => (urls.push(url), 200) });
+  const refused = await LocalEdgeKit_probeSupervisedAppHealth({ ...externalApp, readyPath: "//PATHMARK5.example/x" }, host);
+  assert.deepEqual(urls, ["http://127.0.0.1:3100/"], "only the health path was fetched");
+  assert.equal(refused.healthy, false);
+  assert.deepEqual(refused.checks, [{ path: "/", status: 200, ok: true }, { path: "<21 characters>", status: null, ok: false }]);
+  const hostRefused = await LocalEdgeKit_probeSupervisedAppHealth({ ...externalApp, healthPath: "http://PATHMARK3.example/x" }, host);
+  assert.equal(hostRefused.healthy, false);
+  assert.equal(urls.length, 1, "no further request");
 });
 
 void test("up and down skip check and external entries: nothing is spawned, read for a signal or signalled", async () => {
@@ -454,7 +573,12 @@ void test("since comes from the observed start time and is null when the time is
   }
 });
 
-/** The `since` of an external entry whose pid file names a process with the given start text. */
+/**
+ * The `since` of an external entry whose pid file names a process with the given start text.
+ *
+ * @param start - The start time text as the process list would print it.
+ * @returns The ISO UTC time the status row shows, or null when the text is not accepted.
+ */
 function sinceOfStart(start: string): string | null {
   const host = fakeHost({ processes: [{ pid: 703, group: 703, start, command: "lane" }], files: { "/srv/d.pid": "703\n" } });
   const app = { ...externalApp, pidFile: "/srv/d.pid" };
@@ -467,6 +591,13 @@ void test("since accepts a single-digit day as ps pads it (two spaces), with one
   assert.equal(sinceOfStart("Sun Nov  1 00:00:00 2026"), new Date(2026, 10, 1, 0, 0, 0).toISOString());
   assert.equal(sinceOfStart("Thu Nov 12 03:47:37 2026"), new Date(2026, 10, 12, 3, 47, 37).toISOString());
   assert.equal(sinceOfStart("Mon Nov 30 23:59:59 2026"), new Date(2026, 10, 30, 23, 59, 59).toISOString());
+});
+
+void test("since accepts a zero-padded day on purpose (ps never prints it, but it is an unambiguous day)", () => {
+  assert.equal(sinceOfStart("Sun Nov 01 00:00:00 2026"), new Date(2026, 10, 1, 0, 0, 0).toISOString());
+  assert.equal(sinceOfStart("Fri Nov 06 08:01:02 2026"), new Date(2026, 10, 6, 8, 1, 2).toISOString());
+  assert.equal(sinceOfStart("Fri Nov 00 08:01:02 2026"), null, "day 00 is still not a date");
+  assert.equal(sinceOfStart("Fri Nov  06 08:01:02 2026"), null, "two spaces before a two-digit day stays refused");
 });
 
 void test("since stays strict: wrong spacing, a day of three digits or none, a missing part or an impossible date is null", () => {
