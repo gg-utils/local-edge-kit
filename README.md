@@ -248,6 +248,13 @@ Every catalog entry has a resolved kind: `kind ?? (external ? "external" : "run"
   and keeps the long ones out; `status --json` carries all of them (there is no `--wide` view).
   JSON rows also have `healthStatus` (`ok`, `fail`, `not run` or `null` when not probed) and
   `localPort` is `null` for a `check` entry.
+  `status` probes the health path (and ready path) of a `run` entry that is running and of an enabled
+  `external` entry, with a read-only HTTP GET on `127.0.0.1` through the host's fetch (same timeout
+  and the same healthy rule: 2xx/3xx), so an observe-only entry can show "listening and healthy".
+  A `check` entry is never probed (`not run`), and neither is a disabled entry. An unhealthy
+  `external` row shows `fail` but does not change the exit code of `status`; a running `run` entry
+  that is unhealthy still does. The `since` start time accepts the single-digit day as `ps` pads it
+  (`Fri Nov  6 08:01:02 2026`).
 
 ## CLI
 

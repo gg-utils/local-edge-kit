@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Fix:** `since` was `null` for a process that started on day 1-9 of a month: `ps -o lstart`
+  pads a single-digit day with two spaces (`Fri Nov  6 08:01:02 2026`) and the strict parser wanted
+  one. It now accepts the padded form and a one-space single-digit day, and stays strict otherwise
+  (a two-digit day with two spaces, three spaces, a missing part and impossible dates are still `null`).
+- **Fix:** `status` now probes the health path of an enabled `external` entry that has a
+  `localPort` and `healthPath`, exactly like a `run` entry (read-only GET on `127.0.0.1` through the
+  host's fetch, same timeout and healthy rule). The health column and `healthStatus` / `healthy` /
+  `health` in `--json` show the result instead of `-` / `null`, so an observe-only entry can show
+  "listening and healthy". `check` entries stay `not run`; a disabled entry is not probed; an
+  unhealthy `external` row does not change the exit code of `status`.
 - **Test:** the ancestor recheck while a file is open is now covered: with `refuseSymlinkedParents`,
   an ancestor folder swapped for a symlink between the walk and the open is refused with
   `local-edge-kit-safe-read-changed`.
